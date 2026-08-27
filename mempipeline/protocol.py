@@ -6,6 +6,9 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -37,7 +40,6 @@ class Note:
         return TIER_DIR.get(self.tier, TIER_DIR[DEFAULT_TIER])
 
     def to_frontmatter(self) -> str:
-        import json
         lines = [
             "---",
             "type: note",
@@ -49,22 +51,29 @@ class Note:
             f"status: {self.status}",
         ]
         for k, v in self.extra.items():
-            lines.append(f"{k}: {v}" if isinstance(v, str) else f"{k}: {json.dumps(v, ensure_ascii=False)}")
+            lines.append(k + ": " + v if isinstance(v, str) else f"{k}: {json.dumps(v, ensure_ascii=False)}")
         lines += [f"updated: {self.updated or now_iso()}", "---"]
         return "\n".join(lines)
 
 
 def stable_body(text: str) -> str:
-    """剔除 frontmatter 实时时间戳行(updated:)，返回幂等判定的稳定正文。"""
-    return "\n".join(ln for ln in text.splitlines() if not ln.startswith("updated:"))
+    """剔除 frontmatter 实时时间戳行（含 updated: 变体），返回幂等判定的稳定正文。"""
+    return "\n".join(ln for ln in text.splitlines()
+                     if not re.match(r"^\s*updated\s*:", ln))
+
+
+def strip_frontmatter(text: str) -> str:
+    """剥离首个 frontmatter 块，返回其后的正文；无 frontmatter 则返回原文。"""
+    m = re.match(r"^---\s*\n.*?\n---\s*\n?", text, re.S)
+    if not m:
+        return text
+    return text[m.end():]
 
 
 def content_key(text: str) -> str:
-    import hashlib
     return hashlib.sha256(stable_body(text).encode("utf-8")).hexdigest()[:8]
 
 
 def title_token(title: str) -> str:
-    import re
     token = re.sub(r"[^\w\u4e00-\u9fa5]+", "", title).strip()
     return token or now_iso().replace(" ", "").replace(":", "").replace("-", "")

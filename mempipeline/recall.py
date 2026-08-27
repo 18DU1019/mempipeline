@@ -4,6 +4,7 @@
 开源解释：RecallBackend 是所有读取入口的接口。MemoryRecall 用「查询词在笔记
 纯文本中的子串词频」做轻量相关度打分（对中文无分词场景稳健），并预留
 synonyms 词形映射位，把同义词统一映射到主词后再匹配。
+层目录默认取自 protocol.TIER_DIR，避免重复定义。
 """
 from __future__ import annotations
 
@@ -26,9 +27,12 @@ def _raw_terms(s: str) -> list[str]:
 class MemoryRecall(RecallBackend):
     """按查询词子串词频打分；synonyms 把同义词归一为主词后再匹配。"""
 
-    def __init__(self, mem_root: Path, tiers: Iterable[str] = ("01-长期记忆", "02-中期记忆"),
+    def __init__(self, mem_root: Path, tiers: Iterable[str] | None = None,
                  synonyms: dict[str, list[str]] | None = None):
         self.mem_root = mem_root
+        if tiers is None:
+            from .protocol import TIER_DIR
+            tiers = TIER_DIR.values()
         self.tiers = list(tiers)
         self._norm = {}
         for head, alts in (synonyms or {}).items():

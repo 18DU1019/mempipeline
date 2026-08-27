@@ -3,13 +3,13 @@
 
 数据无关：staging_dir / tier_dirs / 生成的落盘命名全部由调用方传入，不写死任何路径。
 on_ingest 供调用方在每条熔合后执行精确 git add 等副作用。
+层映射统一取自 protocol.TIER_DIR，避免重复定义。
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-from .protocol import Note, content_key, title_token
+from .protocol import DEFAULT_TIER, TIER_DIR, Note, content_key, strip_frontmatter, title_token
 from .engine import write_atomic
 from .audit import AuditBackend
 
@@ -34,16 +34,15 @@ def _parse_fm(text: str) -> dict:
     return out
 
 
-DEFAULT_TIERS = {"long": "01-长期记忆", "medium": "02-中期记忆"}
-
-
-def ingest(staging_dir: Path, mem_root: Path, tier_dirs: dict[str, str],
+def ingest(staging_dir: Path, mem_root: Path, tier_dirs: dict[str, str] | None,
            audit: AuditBackend, on_ingest=None, dry_run: bool = False) -> dict:
     """扫描 staging 目录，用前端协议 + 引擎把带 frontmatter 的裸 md 熔合进镜像。
 
-    非法/缺失的 memory_tier 回落 medium。返回 {"wrote": n, "skipped": n}。
+    tier_dirs 传 None 时使用 protocol.TIER_DIR。非法/缺失的 memory_tier 回落 medium。
+    落盘为「单一 frontmatter（Note 生成）+ 正文」，原始 frontmatter 不重复进入正文。
+    返回 {"wrote": n, "skipped": n}。
     """
-    from .protocol import DEFAULT_TIER
+    tier_dirs = tier_dirs or TIER_DIR
     if not staging_dir.is_dir():
         return {"wrote": 0, "skipped": 0}
     stats = {"wrote": 0, "skipped": 0}
@@ -53,23 +52,21 @@ def ingest(staging_dir: Path, mem_root: Path, tier_dirs: dict[str, str],
         tier = fm.get("tier")
         if tier not in tier_dirs:
             tier = DEFAULT_TIER
-        title = fm.get("title") or "untitled"
-        token = title_token(title)
-        tier_label = tier_dirs.get(tier, "02-中期记忆")
         note = Note(
-            title=title,
+            title=fm.get("title") or "untitled",
             summary=fm.get("summary") or "（无摘要）",
             tier=tier,
             importance=0.6,
             source_agent=fm.get("source_agent") or "workbuddy",
-            body=raw,
+            body=strip_frontmatter(raw).strip(),
         )
-        out = mem_root / tier_label / f"项目会话-{token}-{content_key(note.to_frontmatter() + raw)}.md"
+        token = title_token(note.title)
+        content = note.to_frontmatter() + "\n\n" + note.body + "\n"
+        out = mem_root / tier_dirs[tier] / f"项目会话-{token}-{content_key(content)}.md"
         print(f"  -> {out.relative_to(mem_root)} (tier={tier})")
         if dry_run:
             continue
-        status, _ = write_atomic(out, note.to_frontmatter() + "\n\n" + raw.strip() + "\n",
-                                 audit, source=f"staging:{src.name}")
+        status, _ = write_atomic(out, content, audit, source=f"staging:{src.name}")
         stats[status] += 1
         if on_ingest:
             on_ingest(out)
@@ -88,5 +85,5 @@ def main(argv=None):
     a = p.parse_args(argv)
     from .audit import FileAudit
     audit = FileAudit(Path(a.audit_log), Path(a.manifest), Path(a.root))
-    stats = ingest(Path(a.staging), Path(a.root), dict(DEFAULT_TIERS), audit, dry_run=a.dry_run)
+    stats = ingest(Path(a.staging), Path(a.root), None, audit, dry_run=a.dry_run)
     print(stats)

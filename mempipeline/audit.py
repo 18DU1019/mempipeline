@@ -72,11 +72,18 @@ class FileAudit(AuditBackend):
                 f"manifest 损坏: {self.manifest_path}（已备份到 {backup}）；拒绝覆盖，请先修复该文件") from None
 
     def _save(self, data: dict) -> None:
-        """原子写 manifest：临时文件 + os.replace，读者只会见全旧或全新。"""
+        """原子写 manifest：临时文件 + os.replace，读者只会见全旧或全新。异常时清理临时文件。"""
         self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.manifest_path.with_name(self.manifest_path.name + ".tmp-%d" % os.getpid())
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, self.manifest_path)
+        try:
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(tmp, self.manifest_path)
+        except Exception:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
 
     def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None) -> dict:
         rel = self._rel(path)

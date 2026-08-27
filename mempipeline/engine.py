@@ -29,7 +29,14 @@ def write_atomic(out: Path, text: str, audit: AuditBackend,
         except Exception:
             pass
     tmp = out.with_name(out.name + ".tmp-%d" % os.getpid())
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, out)
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, out)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
     audit.mark(out, "write", source=source)
     return "wrote", True

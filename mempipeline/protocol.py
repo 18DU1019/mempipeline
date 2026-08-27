@@ -15,12 +15,26 @@ from typing import Optional
 
 TIER_DIR = {"long": "01-长期记忆", "medium": "02-中期记忆"}
 DEFAULT_TIER = "medium"
-IMPORTANCE = {"long": 0.9, "medium": 0.6}
-STALE_DAYS = 30
 
 
 def now_iso() -> str:
     return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _fmt_scalar(v: str) -> str:
+    """把字符串值编码为 YAML 双引号标量（无条件引号）。
+
+    强制双引号同时消除两类失真：plain 解析对 `#`/`:` 等指示符的歧义，
+    以及 YAML core schema 把纯数字/布尔字符串解析成 int/bool 的类型失真。
+    """
+    esc = (
+        v.replace("\\", "\\\\")
+         .replace('"', '\\"')
+         .replace("\n", "\\n")
+         .replace("\r", "\\r")
+         .replace("\t", "\\t")
+    )
+    return '"' + esc + '"'
 
 
 @dataclass
@@ -40,19 +54,22 @@ class Note:
         return TIER_DIR.get(self.tier, TIER_DIR[DEFAULT_TIER])
 
     def to_frontmatter(self) -> str:
-        lines = [
-            "---",
-            "type: note",
-            f"title: {self.title}",
-            f"summary: {self.summary}",
-            f"memory_tier: {self.tier}",
-            f"importance: {self.importance}",
-            f"source_agent: {self.source_agent}",
-            f"status: {self.status}",
-        ]
+        body = {
+            "type": "note",
+            "title": self.title,
+            "summary": self.summary,
+            "memory_tier": self.tier,
+            "importance": self.importance,
+            "source_agent": self.source_agent,
+            "status": self.status,
+        }
+        lines = ["---"]
+        for k, v in body.items():
+            lines.append(f"{k}: {_fmt_scalar(v) if isinstance(v, str) else v}")
         for k, v in self.extra.items():
-            lines.append(k + ": " + v if isinstance(v, str) else f"{k}: {json.dumps(v, ensure_ascii=False)}")
-        lines += [f"updated: {self.updated or now_iso()}", "---"]
+            val = _fmt_scalar(v) if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+            lines.append(f"{k}: {val}")
+        lines += [f"updated: {_fmt_scalar(self.updated or now_iso())}", "---"]
         return "\n".join(lines)
 
 

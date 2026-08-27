@@ -24,6 +24,17 @@ def _raw_terms(s: str) -> list[str]:
     return [w for w in re.findall(r"[\w\u4e00-\u9fa5]+", s)]
 
 
+def _score(qterms: list[str], text: str) -> float:
+    """查询词在目标文本中的归一化词频相关度；文本为空返回 0。
+
+    recall.recall 与 crossref.find_related 复用同一打分核心，
+    避免两处漂移。text 需已去空白（中文子串可连续匹配）。
+    """
+    if not text:
+        return 0.0
+    return sum(text.count(q) for q in qterms) / len(text)
+
+
 class MemoryRecall(RecallBackend):
     """按查询词子串词频打分；synonyms 把同义词归一为主词后再匹配。"""
 
@@ -55,9 +66,7 @@ class MemoryRecall(RecallBackend):
                 except Exception:
                     continue
                 text = "".join(txt.split())  # 去空白，中文子串可连续匹配
-                if not text:
-                    continue
-                score = sum(text.count(q) for q in qterms) / len(text)
+                score = _score(qterms, text)
                 if score > 0:
                     scored.append((str(md), score))
         scored.sort(key=lambda x: x[1], reverse=True)

@@ -18,5 +18,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 
+[project.scripts]
+mempipeline-ingest = "mempipeline.ingest:main"
+
 [tool.setuptools.packages.find]
 include = ["mempipeline*"]

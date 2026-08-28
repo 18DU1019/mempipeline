@@ -63,6 +63,31 @@ def main() -> bool:
         recall = MemoryRecall(mem_root, synonyms={"仓位": ["positioning"]})
         hits = recall.recall("风险 仓位", k=5)
         check(any("仓位规则" in h for h, _ in hits), f"召回命中仓位规则 {[h for h, _ in hits]}")
+        # 文档侧同义归一：文档只含英文同义词 positioning，查询用主词"仓位"应能命中
+        (mem_root / "02-中期记忆" / "项目会话-synonym-fe123456.md").write_text(
+            "---\ntype: note\ntitle: positioning规则\nsummary: 仓位同义词测试\n"
+            "memory_tier: medium\nimportance: 0.5\n---\n\npositioning 管理：单笔风险不超过 0.5 ATR。\n",
+            encoding="utf-8")
+        hits2 = recall.recall("仓位 管理", k=5)
+        check(any("synonym" in h for h, _ in hits2), f"文档侧同义归一命中 {[h for h, _ in hits2]}")
+
+        # ---- 2.1 crossref add_backlinks 统计回归（wrote->linked，已存在->skipped） ----
+        print("== crossref add_backlinks 统计 ==")
+        from mempipeline.crossref import find_related, add_backlinks
+        (mem_root / "02-中期记忆" / "项目会话-调度甲-11111111.md").write_text(
+            "---\ntype: note\ntitle: 调度甲\nsummary: 底层\n"
+            "memory_tier: medium\nimportance: 0.5\n---\n\n仓位调度纪律与分配原则。\n",
+            encoding="utf-8")
+        (mem_root / "02-中期记忆" / "项目会话-调度乙-22222222.md").write_text(
+            "---\ntype: note\ntitle: 调度乙\nsummary: 底层\n"
+            "memory_tier: medium\nimportance: 0.5\n---\n\n仓位调度与分配的核心内容。\n",
+            encoding="utf-8")
+        rel = find_related("仓位调度纪律 分配", mem_root, TIER_DIR.values(), min_score=0.0)
+        res = add_backlinks(mem_root, "仓位调度纪律", rel, audit)
+        check(res["linked"] == len(rel), f"新建 backlink counted as linked {res}")
+        res2 = add_backlinks(mem_root, "仓位调度纪律", rel, audit)
+        check(res2["linked"] == 0 and res2["skipped"] == len(rel),
+              f"重复 backlink counted as skipped {res2}")
 
         # ---- 3. 投稿：staging 熔合进 02-中期记忆 ----
         print("== 投稿 ingest ===")
@@ -91,5 +116,150 @@ def main() -> bool:
     return ok
 
 
+def test_crash_recover_sidecar() -> bool:
+    """崩溃恢复 sidecar 专项：残留 .bak 应在幂等跳过时被登记为 recover 并清理。"""
+    import shutil
+    ok = True
+
+    def check(cond: bool, msg: str):
+        nonlocal ok
+        tag = "PASS" if cond else "FAIL"
+        print(f"  [{tag}] {msg}")
+        if not cond:
+            ok = False
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem_root = tmp / "mem"
+        (mem_root / "01-长期记忆").mkdir(parents=True)
+        log_path = tmp / "audit" / "log.md"
+        manifest_path = tmp / "audit" / "manifest.json"
+        audit = FileAudit(log_path, manifest_path, mem_root)
+
+        note = Note(title="崩溃恢复", summary="sidecar 测试", tier="long",
+                    importance=0.5, body="正文体。")
+        out = mem_root / TIER_DIR["long"] / "项目会话-崩溃恢复-cafe0000.md"
+        s1, _ = write_atomic(out, note.to_frontmatter() + "\n\n" + note.body + "\n", audit)
+        check(s1 == "wrote", f"首次写 -> {s1}")
+        # 模拟崩溃残留：写入完成但 .bak 未清理（真实场景=os.replace 后 audit 前中断）
+        bak = out.with_name(out.name + ".bak")
+        shutil.copy2(out, bak)
+        check(bak.exists(), "预留崩溃残留 .bak")
+        # 幂等跳过分支应检测残留并登记 recover
+        s2, _ = write_atomic(out, note.to_frontmatter() + "\n\n" + note.body + "\n", audit)
+        check(s2 == "skipped", f"残留存在时幂等 -> {s2}")
+        check(not bak.exists(), "残留 .bak 已被清理")
+        log = log_path.read_text(encoding="utf-8")
+        check("| recover |" in log, "审计日志已登记 recover 行")
+    print("\nCRASH RECOVER:", "ALL PASS" if ok else "SOME FAILED")
+    return ok
+
+def test_tfidf_recall() -> bool:
+    """ngram TF-IDF 召回专项：命中率 / 区分度 / 同义不回归 / 接口不破。"""
+    ok = True
+
+    def check(cond: bool, msg: str):
+        nonlocal ok
+        tag = "PASS" if cond else "FAIL"
+        print(f"  [{tag}] {msg}")
+        if not cond:
+            ok = False
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem_root = tmp / "mem"
+        (mem_root / "02-中期记忆").mkdir(parents=True)
+        d = mem_root / "02-中期记忆"
+        (d / "target.md").write_text(
+            "---\ntype: note\ntitle: 仓位调度\nsummary: 量化仓位规则\n"
+            "memory_tier: medium\nimportance: 0.9\n---\n\n"
+            "量化仓位调度规则：单笔风险不超过 1 ATR，按信号强度分配仓位。\n",
+            encoding="utf-8")
+        (d / "distractor.md").write_text(
+            "---\ntype: note\ntitle: 市场风险\nsummary: 风险提示\n"
+            "memory_tier: medium\nimportance: 0.4\n---\n\n"
+            "市场风险提示：今日波动加大，注意控制风险敞口。\n",
+            encoding="utf-8")
+        (d / "unrelated.md").write_text(
+            "---\ntype: note\ntitle: 定投纪律\nsummary: 定投\n"
+            "memory_tier: medium\nimportance: 0.3\n---\n\n"
+            "当季定投纪律，每月固定日期执行。\n",
+            encoding="utf-8")
+
+        # 命中率 + 区分度：强查询应命中 target 且排第一，distractor 不混入
+        r = MemoryRecall(mem_root)
+        hits = r.recall("仓位调度 分配", k=5)
+        top = hits[0][0] if hits else ""
+        check(any("target.md" in h for h, _ in hits),
+              f"命中 target {[h for h, _ in hits]}")
+        check("target.md" in top, f"target 排第一 (top={top})")
+        check(not any("distractor.md" in h for h, _ in hits), "distractor 不混入")
+
+        # 同义不回归：positioning 归一为 仓位 后仍召回
+        r2 = MemoryRecall(mem_root, synonyms={"仓位": ["positioning"]})
+        hits2 = r2.recall("positioning 调度", k=5)
+        check(any("target.md" in h for h, _ in hits2), "同义 positioning 仍命中 target")
+
+        # 接口不破：类型 / 降序 / 长度上限 / 空查询
+        check(len(hits) <= 5, "结果数不超过 k")
+        check(all(a[1] >= b[1] for a, b in zip(hits, hits[1:])), "按分数降序")
+        check(all(isinstance(t, tuple) and len(t) == 2 and isinstance(t[1], float)
+                  for t in hits), "返回 list[tuple[str,float]]")
+        check(r.recall("") == [] and r.recall("   ") == [], "空查询返回 []")
+    print("\nTFIDF RECALL:", "ALL PASS" if ok else "SOME FAILED")
+    return ok
+
+
+def test_recall_golden() -> bool:
+    """PDCA · Check 信号层：golden 回归命中率、passed 断言、并确保 Act 不自动改参数。"""
+    ok = True
+
+    def check(cond: bool, msg: str):
+        nonlocal ok
+        tag = "PASS" if cond else "FAIL"
+        print(f"  [{tag}] {msg}")
+        if not cond:
+            ok = False
+
+    from mempipeline.recall_golden import check as golden_check
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem_root = tmp / "mem"
+        (mem_root / "01-长期记忆").mkdir(parents=True)
+        (mem_root / "02-中期记忆").mkdir(parents=True)
+        long_d = mem_root / "01-长期记忆"
+        mid_d = mem_root / "02-中期记忆"
+        (long_d / "项目会话-仓位规则-ab12cd34.md").write_text(
+            "---\ntype: note\ntitle: 仓位规则\nsummary: 单笔风险\n"
+            "memory_tier: long\nimportance: 0.9\n---\n\n"
+            "单笔风险不超过 1 ATR，按信号强度分配仓位。\n", encoding="utf-8")
+        (mid_d / "项目会话-仓位调度-cd34cd34.md").write_text(
+            "---\ntype: note\ntitle: 仓位调度\nsummary: 量化仓位规则\n"
+            "memory_tier: medium\nimportance: 0.9\n---\n\n"
+            "量化仓位调度规则：按信号强度分配仓位。\n", encoding="utf-8")
+        (mid_d / "项目会话-市场风险-ef56ef56.md").write_text(
+            "---\ntype: note\ntitle: 市场风险\nsummary: 风险提示\n"
+            "memory_tier: medium\nimportance: 0.4\n---\n\n"
+            "市场风险提示：今日波动加大。\n", encoding="utf-8")
+
+        syn = {"仓位": ["positioning"]}
+        sig = golden_check(mem_root, synonyms=syn)
+        check(sig["hit_rate"] >= 2 / 3, f"命中率 = {sig['hit_rate']:.2f}")
+        check(sig["passed"] is True, "passed=True（跌破红线才报错）")
+        check(len(sig["results"]) == 3, "逐条覆盖 3 条 golden")
+        check(all(r["phase"] in ("hit", "miss") for r in sig["results"]),
+              "每条都有 hit/miss 相位")
+        # Act 留人：同一召回调用前后一致，check 不改任何状态
+        r1 = MemoryRecall(mem_root, synonyms=syn).recall("风险 仓位", k=5)
+        r2 = MemoryRecall(mem_root, synonyms=syn).recall("风险 仓位", k=5)
+        check(r1 == r2, "check 无副作用：召回结果前后一致")
+    print("\nRECALL GOLDEN (PDCA Check):", "ALL PASS" if ok else "SOME FAILED")
+    return ok
+
+
 if __name__ == "__main__":
-    sys.exit(0 if main() else 1)
+    main_result = main()
+    crash_result = test_crash_recover_sidecar()
+    tfidf_result = test_tfidf_recall()
+    golden_result = test_recall_golden()
+    sys.exit(0 if (main_result and crash_result and tfidf_result and golden_result) else 1)

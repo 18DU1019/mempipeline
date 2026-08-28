@@ -159,7 +159,10 @@ def add_backlinks(mem_root: Path, new_title: str, related: Iterable[Path],
         merged = f"{exist} {back}".strip()
         status, _ = write_atomic(target, _upsert_links(cur, merged), audit,
                                  source=f"backlink:{new_title}")
-        stats[status if status in stats else "skipped"] += 1
+        if status == "wrote":
+            stats["linked"] += 1     # 修复：wrote 计入 linked，不再误落 skipped
+        else:
+            stats["skipped"] += 1
     return stats
 
 

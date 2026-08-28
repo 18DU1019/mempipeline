@@ -1,5 +1,8 @@
 # mempipeline
 
+![ci](https://github.com/18DU1019/mempipeline/actions/workflows/ci.yml/badge.svg)
+
+
 **Shared-memory *write* pipeline for the 1-writer / N-contributor /
 unlimited-reader model.** Atomic idempotent writes, a pluggable audit
 backend, and a staging ingest gate — with zero private paths baked in.
@@ -47,6 +50,8 @@ assert status == "wrote"      # first write
 status, _ = write_atomic(out, note.to_frontmatter() + "\n\n" + note.body + "\n", audit)
 assert status == "skipped"    # idempotent: same stable body, no rewrite
 ```
+
+> Run the zero-dependency end-to-end suite locally: `python test_mempipeline.py`
 
 ### N contributors via staging
 

@@ -5,5 +5,8 @@ __pycache__/
 build/
 dist/
 
-# 本地运行期产物（不提交）
+# Local runtime artifacts (not committed)
 example_data/
+
+# Real user config (never commit; only config.example.py sample is committed)
+config.py

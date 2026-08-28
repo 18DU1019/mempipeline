@@ -6,7 +6,7 @@ backend, and a staging ingest gate — with zero private paths baked in.
 
 `mempipeline` sits on the **writer side** of a layered Markdown memory
 mirror. Readers (recall / injection) live in the sibling library
-[`distill-mem`](https://github.com/18DU1019/distill-mem).
+`distill-mem`.
 
 ## Model
 
@@ -80,7 +80,7 @@ ingest(
 
 ### 定位与三种身份
 
-`mempipeline` 是「1 写者 + N 投稿 + 无限读」模型的**写侧**管线。镜像是一个分层的 Markdown 目录，读者的召回/注入在兄弟库 [`distill-mem`](https://github.com/18DU1019/distill-mem)。
+`mempipeline` 是「1 写者 + N 投稿 + 无限读」模型的**写侧**管线。镜像是一个分层的 Markdown 目录，读者的召回/注入在兄弟库 `distill-mem`。
 
 | 身份 | 能力 | 通道 | 落点 |
 |---|---|---|---|

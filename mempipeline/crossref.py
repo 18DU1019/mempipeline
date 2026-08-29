@@ -21,6 +21,7 @@ from typing import Iterable
 from .protocol import _fmt_scalar  # noqa: F401 保留 import 位（后续可直接用）
 from .engine import write_atomic
 from .audit import AuditBackend
+from .recall import scan_tier_dirs
 
 WIKILINK_MAX = 8    # 每条笔记最多挂的交叉引用数（对应 AMV 的 top-K）
 MIN_SCORE = 0.05    # 相似度下限（bigram Jaccard）：零/极低重叠的直接丢弃
@@ -105,12 +106,15 @@ def _upsert_links(text: str, links: str) -> str:
 def find_related(note_text: str, mem_root: Path, tiers: Iterable[str] | None = None,
                  k: int = WIKILINK_MAX, min_score: float | None = MIN_SCORE,
                  exclude: Path | None = None,
-                 exclude_title: str | None = None) -> list[Path]:
+                 exclude_title: str | None = None,
+                 projects: Iterable[str] | None = None) -> list[Path]:
     """返回与 note_text 最相近的 Top-K 现有笔记（去空白全文的字符 bigram Jaccard）。
 
     结果按相似度降序，并过滤低于 min_score 的零/极低重叠项。
     exclude 排除指定路径；exclude_title 排除同标题笔记（重跑时已落盘的同一篇自身，
-    避免自我链接破坏幂等）。无向量、无分词依赖，中文子串即可命中。
+    避免自我链接破坏幂等）。projects 限定建链作用域（None=全库）——G1 修复：
+    项目隔离下交叉引用必须只在同项目内建链，防止跨项目链接泄漏。
+    无向量、无分词依赖，中文子串即可命中。
     """
     ga = _bigrams(note_text)
     if not ga:
@@ -120,15 +124,16 @@ def find_related(note_text: str, mem_root: Path, tiers: Iterable[str] | None = N
         tiers = TIER_DIR.values()
     scored: list[tuple[Path, float]] = []
     for tier in tiers:
-        for md in (mem_root / tier).glob("*.md"):
-            if exclude is not None and md.resolve() == exclude.resolve():
-                continue
-            if exclude_title is not None and _title_of(md) == exclude_title:
-                continue
-            s = _jaccard(ga, _bigrams(_norm_text(md)))
-            if min_score is not None and s < min_score:
-                continue
-            scored.append((md, s))
+        for d in scan_tier_dirs(mem_root, tier, projects):
+            for md in d.glob("*.md"):
+                if exclude is not None and md.resolve() == exclude.resolve():
+                    continue
+                if exclude_title is not None and _title_of(md) == exclude_title:
+                    continue
+                s = _jaccard(ga, _bigrams(_norm_text(md)))
+                if min_score is not None and s < min_score:
+                    continue
+                scored.append((md, s))
     scored.sort(key=lambda x: x[1], reverse=True)
     return [md for md, _ in scored[:k]]
 
@@ -167,13 +172,14 @@ def add_backlinks(mem_root: Path, new_title: str, related: Iterable[Path],
 
 
 def upsert_crossrefs(note_text: str, out: Path, mem_root: Path, audit: AuditBackend,
-                     tiers: Iterable[str] | None = None) -> tuple[str, dict]:
+                     tiers: Iterable[str] | None = None,
+                     projects: Iterable[str] | None = None) -> tuple[str, dict]:
     """独立入口（engine 用户用）：对新笔记内容 upsert forward links，再回写 backlinks。
 
     返回 (links_str, backlinks_stats)。注意：这是就地改文本；若已落盘需调用方
     自行经 write_atomic 写回。ingest 走的是更优路径（落盘前注入，见 ingest）。
     """
-    related = find_related(note_text, mem_root, tiers, exclude=out)
+    related = find_related(note_text, mem_root, tiers, exclude=out, projects=projects)
     fwd = links_string(related)
     back = add_backlinks(mem_root, _title_of(out), related, audit) if related else \
         {"linked": 0, "skipped": 0}

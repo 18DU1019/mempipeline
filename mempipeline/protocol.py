@@ -47,6 +47,8 @@ class Note:
     status: str = "active"
     body: str = ""
     updated: Optional[str] = None
+    project_id: Optional[str] = None      # E1：项目隔离维度（None=legacy/全局）
+    domain: Optional[str] = None          # E1：project | global（None=legacy 推断）
     extra: dict = field(default_factory=dict)
 
     @property
@@ -63,6 +65,10 @@ class Note:
             "source_agent": self.source_agent,
             "status": self.status,
         }
+        if self.project_id:
+            body["project_id"] = self.project_id
+        if self.domain:
+            body["domain"] = self.domain
         lines = ["---"]
         for k, v in body.items():
             lines.append(f"{k}: {_fmt_scalar(v) if isinstance(v, str) else v}")

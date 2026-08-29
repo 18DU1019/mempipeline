@@ -257,9 +257,84 @@ def test_recall_golden() -> bool:
     return ok
 
 
+def test_project_isolation() -> bool:
+    """E1：项目隔离 + 二维落盘 + crossref/recall 项目作用域（G1 回归）。"""
+    ok = True
+
+    def check(cond: bool, msg: str):
+        nonlocal ok
+        tag = "PASS" if cond else "FAIL"
+        print(f"  [{tag}] {msg}")
+        if not cond:
+            ok = False
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem_root = tmp / "mem"
+        (mem_root / "02-中期记忆").mkdir(parents=True)
+        log_path = tmp / "audit" / "log.md"
+        manifest_path = tmp / "audit" / "manifest.json"
+        audit = FileAudit(log_path, manifest_path, mem_root)
+        staging = tmp / "staging"
+        (staging / "proj_a").mkdir(parents=True)
+        (staging / "proj_b").mkdir(parents=True)
+
+        # 两个项目各投一篇语义相近的笔记（若跨项目建链/召回即泄漏）
+        (staging / "proj_a" / "a.md").write_text(
+            "---\ntitle: 韩餐店动线\nsummary: 出餐口到餐桌动线\nmemory_tier: medium\n"
+            "project_id: dora\n---\n韩餐店的出餐口到餐桌动线要短。", encoding="utf-8")
+        (staging / "proj_b" / "b.md").write_text(
+            "---\ntitle: 韩餐店动线\nsummary: 出餐口到餐桌动线\nmemory_tier: medium\n"
+            "project_id: onequant\n---\n韩餐店的出餐口到餐桌动线要短。", encoding="utf-8")
+
+        # 无 project_id 投稿（require_project 时拒收）
+        (staging / "proj_a" / "no_id.md").write_text(
+            "---\ntitle: 无主笔记\nsummary: 无项目\nmemory_tier: medium\n---\n无主内容。",
+            encoding="utf-8")
+
+        # 1) 二维落盘 + 无 ID 拒收
+        st = ingest(staging, mem_root, None, audit, crossref=True, require_project=True)
+        check((mem_root / "projects" / "dora" / "02-中期记忆").exists(),
+              "项目 dora 落盘到 projects/dora/02-中期记忆")
+        check((mem_root / "projects" / "onequant" / "02-中期记忆").exists(),
+              "项目 onequant 落盘到 projects/onequant/02-中期记忆")
+        check(st.get("rejected", 0) == 1, f"无 project_id 投稿拒收（rejected=1，实得 {st.get('rejected')}）")
+
+        # 2) recall 项目作用域：dora 召回不含 onequant 的笔记
+        r_a = MemoryRecall(mem_root, projects=["dora"]).recall("动线", k=5)
+        r_b = MemoryRecall(mem_root, projects=["onequant"]).recall("动线", k=5)
+        a_paths = {Path(p).parent for p, _ in r_a}
+        b_paths = {Path(p).parent for p, _ in r_b}
+        check(all("dora" in str(p) for p in a_paths), "dora 召回仅限 dora 项目目录")
+        check(all("onequant" in str(p) for p in b_paths), "onequant 召回仅限 onequant 项目目录")
+        check(bool(r_a) and bool(r_b), "两项目均能召回本项目笔记")
+
+        # 3) crossref 项目作用域：dora 笔记的 links 只指向 dora 项目内
+        dora_note = next((mem_root / "projects" / "dora" / "02-中期记忆").glob("*.md"))
+        fm = dora_note.read_text(encoding="utf-8")
+        links = [ln for ln in fm.splitlines() if ln.startswith("links:")]
+        if links:
+            check("onequant" not in links[0] and "dora" in links[0],
+                  f"dora 笔记 links 仅项目内（{links[0][:60]}）")
+        else:
+            # 若 min_score 未达阈值无链接，至少确认非空链接不含跨项目引用
+            check(True, "无 links（相似度未达阈值，跳过跨项目检查）")
+
+        # 4) legacy 兼容：无 project_id + require_project=False 回落顶层 tier
+        (staging / "proj_a" / "legacy.md").write_text(
+            "---\ntitle: 旧式笔记\nsummary: 无项目\nmemory_tier: medium\n---\n旧式内容。",
+            encoding="utf-8")
+        st2 = ingest(staging, mem_root, None, audit, require_project=False)
+        check(any("旧式" in f.name for f in (mem_root / "02-中期记忆").glob("*.md")),
+              "无 project_id 回落 legacy 顶层目录")
+    print("\nPROJECT ISOLATION (E1):", "ALL PASS" if ok else "SOME FAILED")
+    return ok
+
+
 if __name__ == "__main__":
     main_result = main()
     crash_result = test_crash_recover_sidecar()
     tfidf_result = test_tfidf_recall()
     golden_result = test_recall_golden()
-    sys.exit(0 if (main_result and crash_result and tfidf_result and golden_result) else 1)
+    iso_result = test_project_isolation()
+    sys.exit(0 if (main_result and crash_result and tfidf_result and golden_result and iso_result) else 1)

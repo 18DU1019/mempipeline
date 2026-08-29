@@ -67,7 +67,9 @@ class SemanticIndex:
 
     def __init__(self, db_path: Path):
         self.db_path = db_path
-        self._conn = sqlite3.connect(str(db_path))
+        # check_same_thread=False：面板走 ThreadingHTTPServer，每个请求一个
+        # 线程，索引连接须可跨线程使用（sqlite3 连接自带上锁，安全）
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS emb (path TEXT PRIMARY KEY,"
             " vec BLOB NOT NULL, tier TEXT, project TEXT)")

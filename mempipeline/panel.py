@@ -334,3 +334,8 @@ def main(argv=None) -> int:
     serve(Path(a.mem_root), Path(a.audit_log) if a.audit_log else None,
           idx, port=a.port, audit=audit)
     return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())

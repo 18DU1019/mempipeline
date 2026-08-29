@@ -31,6 +31,12 @@ try:
 except Exception:  # 语义层可选（如依赖异常时面板仍可用）
     _HAS_SEMANTIC = False
 
+try:
+    from .ops import collect_ops
+    _HAS_OPS = True
+except Exception:  # 运维模块可选（面板降级仍可打开）
+    _HAS_OPS = False
+
 
 def _read_frontmatter(md: Path) -> dict:
     _FM = re.compile(r"^---\s*\n(.*?)\n---", re.S)
@@ -102,7 +108,7 @@ def _json(handler, obj: dict, status: int = 200) -> None:
 
 
 _PAGE = """<!DOCTYPE html>
-<html lang="zh"><meta charset="utf-8"><title>mempipeline 记忆面板</title>
+<html lang="zh"><meta charset="utf-8"><title>mempipeline 工作台</title>
 <style>
 body{background:#11151c;color:#d3d1c7;font-family:system-ui,sans-serif;margin:0;padding:24px}
 h1{font-size:18px;font-weight:500;color:#b5d4f4} h2{font-size:14px;font-weight:500;margin-top:20px;color:#9fe1cb}
@@ -113,18 +119,41 @@ td{padding:6px 8px;border-bottom:1px solid #222834}
 button{background:#185fa5;border:0;color:#fff;border-radius:4px;padding:4px 10px;cursor:pointer;margin-right:6px}
 button.danger{background:#a32d2d} input{background:#11151c;border:1px solid #2c323d;color:#d3d1c7;border-radius:4px;padding:6px}
 .bar{display:inline-block;height:10px;background:#185fa5;border-radius:3px;vertical-align:middle}
+.tabs{margin:12px 0 4px}
+.tabs button{background:#20293a;color:#9fb0c7;border:1px solid #2c323d}
+.tabs button.on{background:#185fa5;color:#fff}
+.muted{color:#888780;font-size:12px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.up{background:#3fb950} .down{background:#6e7681}
 </style>
 <body>
-<h1>mempipeline 记忆面板 <span style="font-size:12px;color:#888780">v0.5.0 · 只读为主</span></h1>
+<h1>mempipeline 工作台 <span class="muted">v0.6.0 · 记忆 + 运维统一入口</span></h1>
+<div class="tabs"><button id="tb-memory" class="on" onclick="tab('memory')">记忆</button>
+<button id="tb-ops" onclick="tab('ops')">运维看板</button></div>
+
+<div id="tab-memory">
 <div class="card" id="stats"></div>
 <h2>审核队列（candidate）</h2><div class="card" id="queue"></div>
 <h2>语义检索（hybrid）</h2><div class="card"><input id="q" placeholder="查询…" style="width:60%">
 <button onclick="search()">检索</button><div id="sr" style="margin-top:10px"></div></div>
 <h2>审计日志</h2><div class="card" id="audit"></div>
+</div>
+
+<div id="tab-ops" style="display:none">
+<h2>WorkBuddy 自动化</h2><div class="card" id="opsAuto">加载中…</div>
+<h2>Windows 计划任务（零 agent 运维）</h2><div class="card" id="opsTask">加载中…</div>
+<h2>服务端口</h2><div class="card" id="opsSvc">加载中…</div>
+<h2>最新体检 / 监控报告</h2><div class="card" id="opsRep">加载中…</div>
+</div>
+
 <script>
 async function j(u,o){const r=await fetch(u,o);return r.json()}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function bar(cnt,total){const w=Math.round(cnt/total*300);return `<span class="bar" style="width:${w}px"></span> ${cnt}`}
+function tab(n){document.getElementById('tab-memory').style.display=n==='memory'?'':'none';
+document.getElementById('tab-ops').style.display=n==='ops'?'':'none';
+document.getElementById('tb-memory').className=n==='memory'?'on':'';
+document.getElementById('tb-ops').className=n==='ops'?'on':'';if(n==='ops')loadOps()}
 async function loadStats(){const s=await j('/api/stats');
 document.getElementById('stats').innerHTML=`<b>${s.total}</b> 篇笔记 · 审核队列 <b>${s.queue}</b><br><br>
 <table><tr><th>状态</th><th>项目</th><th>层级</th></tr><tr>
@@ -141,6 +170,22 @@ async function search(){const q=document.getElementById('q').value;const r=await
 document.getElementById('sr').innerHTML=r.map(x=>`<div>${esc(x.path)} <span style="color:#888780">${x.score.toFixed(4)}</span></div>`).join('')||'<i>无结果</i>'}
 async function loadAudit(){const a=await j('/api/audit?n=30');
 document.getElementById('audit').innerHTML=`<table><tr><th>#</th></tr>${a.map(l=>`<tr><td>${esc(l)}</td></tr>`).join('')}</table>`}
+async function loadOps(){const o=await j('/api/ops');
+if(o.error){const m='读取失败：'+o.error;['opsAuto','opsTask','opsSvc','opsRep'].forEach(id=>document.getElementById(id).innerHTML=esc(m));return}
+const A=o.automations.active,P=o.automations.paused;
+document.getElementById('opsAuto').innerHTML=
+`<div class="muted">生效 ${A.length} 条 · 已停用 ${P.length} 条 · 采集于 ${esc(o.generated||'')}</div>`+
+(A.length?`<table style="margin-top:8px"><tr><th>生效中</th><th>调度</th></tr>`+
+A.map(a=>`<tr><td>${esc(a.name)}</td><td class="muted">${esc(a.rrule||'(单次/未设)')}</td></tr>`).join('')+'</table>':'')+
+(P.length?`<details style="margin-top:8px"><summary class="muted">已停用 ${P.length} 条（展开查看）</summary>
+<table style="margin-top:6px">`+P.map(a=>`<tr><td>${esc(a.name)}</td><td class="muted">${esc(a.status)}</td></tr>`).join('')+'</table></details>':'');
+document.getElementById('opsTask').innerHTML=`<table><tr><th>任务</th><th>状态</th></tr>`+
+o.tasks.map(t=>`<tr><td>${esc(t.name)}</td><td class="muted">${esc(t.state)}</td></tr>`).join('')+'</table>';
+document.getElementById('opsSvc').innerHTML=`<table><tr><th>服务</th><th>端口</th><th>状态</th></tr>`+
+o.services.map(s=>`<tr><td>${esc(s.name)}</td><td class="muted">${s.port}</td>
+<td><span class="dot ${s.online?'up':'down'}"></span>${s.online?'在线':'离线'}</td></tr>`).join('')+'</table>';
+document.getElementById('opsRep').innerHTML=o.reports.length?`<table><tr><th>报告</th><th>类型</th><th>时间</th></tr>`+
+o.reports.map(r=>`<tr><td>${esc(r.name)}</td><td class="muted">${esc(r.dir)}</td><td class="muted">${esc(r.mtime)}</td></tr>`).join('')+'</table>':'<i>暂无报告</i>'}
 loadStats();loadQueue();loadAudit();
 </script></body></html>"""
 
@@ -175,6 +220,14 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/audit":
             n = int(qs.get("n", ["30"])[0])
             _json(self, _audit_tail(self.audit_log, n) if self.audit_log else [])
+        elif path == "/api/ops":
+            if _HAS_OPS:
+                try:
+                    _json(self, collect_ops())
+                except Exception as e:
+                    _json(self, {"error": f"ops 采集失败：{e}"}, 500)
+            else:
+                _json(self, {"error": "ops module unavailable"}, 503)
         elif path == "/api/search":
             q = qs.get("q", [""])[0]
             proj = qs.get("project", [None])[0]

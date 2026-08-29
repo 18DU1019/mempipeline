@@ -46,26 +46,78 @@ def collect_automations(db: Path = WORKWUDDY_DB) -> list[dict]:
     return rows
 
 
+def _decode_console(raw: bytes) -> str:
+    """Windows 控制台输出编码自适应：schtasks 中文环境输出 UTF-16LE。"""
+    if not raw:
+        return ""
+    for enc in ("utf-16-le", "utf-16", "gbk", "utf-8"):
+        try:
+            text = raw.decode(enc)
+        except Exception:
+            continue
+        if "TaskName" in text or "任务名" in text or "," in text:
+            return text
+    return raw.decode("utf-8", errors="replace")
+
+
+def _tasks_via_schtasks(keywords: tuple) -> list[dict]:
+    """用 schtasks /FO CSV 采集（不依赖 PowerShell）。"""
+    import csv
+    import io
+
+    p = subprocess.run(["schtasks", "/Query", "/FO", "CSV", "/NH"],
+                       capture_output=True, timeout=60)
+    text = _decode_console(p.stdout or b"")
+    out = []
+    for row in csv.reader(io.StringIO(text)):
+        if len(row) < 3:
+            continue
+        # 列序：TaskName, Next Run Time, Status
+        name = row[0].strip().strip('"').lstrip("\\")
+        next_run = row[1].strip().strip('"')
+        state = row[2].strip().strip('"')
+        if not name or name.lower() in ("taskname", "任务名"):
+            continue
+        if any(k.lower() in name.lower() for k in keywords):
+            out.append({"name": name, "state": state, "next_run": next_run})
+    return out
+
+
+def _tasks_via_powershell(keywords: tuple) -> list[dict]:
+    """回退方案：PowerShell Get-ScheduledTask。"""
+    p = subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         "Get-ScheduledTask | Select-Object TaskName,State | ConvertTo-Json -Compress"],
+        capture_output=True, text=True, timeout=60)
+    data = json.loads((p.stdout or "").strip() or "[]")
+    if isinstance(data, dict):
+        data = [data]
+    out = []
+    for t in data:
+        nm = t.get("TaskName", "")
+        if any(k.lower() in nm.lower() for k in keywords):
+            out.append({"name": nm, "state": t.get("State", "?"), "next_run": ""})
+    return out
+
+
 def collect_tasks(keywords: tuple = TASK_KEYWORDS) -> list[dict]:
-    """读 Windows 计划任务（PowerShell Get-ScheduledTask，带短缓存）。"""
+    """读 Windows 计划任务（schtasks 优先，PowerShell 回退，带短缓存）。"""
     now = time.time()
     if _CACHE["data"].get("tasks") and now - _CACHE["at"] < _TTL:
         return _CACHE["data"]["tasks"]
-    tasks = []
-    try:
-        p = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "Get-ScheduledTask | Select-Object TaskName,State | ConvertTo-Json -Compress"],
-            capture_output=True, text=True, timeout=60)
-        data = json.loads(p.stdout.strip() or "[]")
-        if isinstance(data, dict):
-            data = [data]
-        for t in data:
-            nm = t.get("TaskName", "")
-            if any(k.lower() in nm.lower() for k in keywords):
-                tasks.append({"name": nm, "state": t.get("State", "?")})
-    except Exception as e:
-        tasks = [{"name": f"（读取失败：{e}）", "state": "UNKNOWN"}]
+    tasks: list[dict] = []
+    err = None
+    for fn in (_tasks_via_schtasks, _tasks_via_powershell):
+        try:
+            tasks = fn(keywords)
+            if tasks:
+                break
+        except Exception as e:  # 单点失败不影响其他项
+            err = e
+            continue
+    if not tasks:
+        tasks = [{"name": f"（读取失败：{err or '无匹配任务'}）", "state": "UNKNOWN",
+                  "next_run": ""}]
     _CACHE["data"]["tasks"] = tasks
     _CACHE["at"] = now
     return tasks

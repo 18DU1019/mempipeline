@@ -113,97 +113,165 @@ _PAGE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>mempipeline 工作台</title>
 <style>
-body{background:#11151c;color:#d3d1c7;font-family:system-ui,sans-serif;margin:0;padding:24px}
-h1{font-size:18px;font-weight:500;color:#b5d4f4} h2{font-size:14px;font-weight:500;margin-top:20px;color:#9fe1cb}
-.card{background:#1a2029;border:1px solid #2c323d;border-radius:8px;padding:14px;margin:10px 0}
+:root{
+--color-canvas:#07080a;--color-surface-1:#0d0d0d;--color-surface-2:#121212;--color-surface-3:#171717;
+--color-hairline:rgba(255,255,255,0.08);--color-hairline-soft:#242728;--color-hairline-strong:rgba(255,255,255,0.16);
+--color-field-border:#6b7684;
+--color-ink:#f4f4f6;--color-ink-body:#cdcdcd;--color-ink-muted:#9c9c9d;--color-ink-subtle:#7d7e80;
+--color-brand:#22d3ee;--color-brand-hover:#67e8f9;--color-brand-active:#06b6d4;--color-brand-soft:rgba(34,211,238,0.12);
+--color-accent:#a78bfa;--color-success:#59d499;--color-warning:#ffc533;--color-danger:#ff6161;--color-info:#57c1ff;
+--font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Hiragino Sans GB",Inter,sans-serif;
+--font-mono:ui-monospace,"SF Mono","Cascadia Code",Consolas,monospace;
+--radius-control:6px;--radius-card:8px;--radius-container:12px;
+--shadow-focus:0 0 0 2px rgba(34,211,238,0.5);--shadow-overlay:0 16px 48px rgba(0,0,0,0.6);
+}
+*{box-sizing:border-box}
+body{background:var(--color-canvas);color:var(--color-ink-body);font-family:var(--font-sans);font-size:13px;line-height:1.6;margin:0}
+.container{max-width:1200px;margin:0 auto;padding:0 24px}
+.topbar{border-bottom:1px solid var(--color-hairline);padding:24px 0 16px}
+.display{font-size:24px;font-weight:600;line-height:1.25;letter-spacing:-0.02em;color:var(--color-ink);margin:0}
+.topbar__sub{font-size:12px;color:var(--color-ink-muted);margin:4px 0 0}
+.tabs{display:flex;gap:8px;margin:16px auto 24px}
+.tab{min-height:32px;padding:0 12px;border-radius:var(--radius-control);border:1px solid transparent;background:transparent;color:var(--color-ink-muted);font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;transition:background 120ms ease-out,color 120ms ease-out}
+.tab:hover{background:var(--color-surface-2);color:var(--color-ink)}
+.tab.is-active{background:var(--color-surface-3);color:var(--color-ink);box-shadow:inset 2px 0 0 var(--color-brand)}
+.panel{display:none}.panel.is-active{display:block}
+.h1{font-size:18px;font-weight:600;line-height:1.33;letter-spacing:-0.01em;color:var(--color-ink);margin:24px 0 8px}
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.kpi{background:var(--color-surface-1);border:1px solid var(--color-hairline);border-radius:var(--radius-card);padding:12px}
+.kpi__label{font-size:12px;color:var(--color-ink-muted);line-height:1.5}
+.kpi__value{font-size:24px;font-weight:600;line-height:1.25;letter-spacing:-0.02em;color:var(--color-ink);font-variant-numeric:tabular-nums;margin-top:4px}
+.kpi--warn .kpi__value{color:var(--color-warning)}
+.card{background:var(--color-surface-1);border:1px solid var(--color-hairline);border-radius:var(--radius-card);padding:16px;margin-bottom:16px}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th{text-align:left;color:#888780;font-weight:500;padding:6px 8px;border-bottom:1px solid #2c323d}
-td{padding:6px 8px;border-bottom:1px solid #222834}
-button{background:#185fa5;border:0;color:#fff;border-radius:4px;padding:6px 12px;min-height:28px;cursor:pointer;margin-right:6px}
-button.danger{background:#a32d2d} input{background:#11151c;border:1px solid #6b7684;color:#d3d1c7;border-radius:4px;padding:6px;min-height:28px}
-.bar{display:inline-block;height:10px;background:#2f7fd0;border-radius:3px;vertical-align:middle}
-.tabs{margin:12px 0 4px}
-.tabs button{background:#20293a;color:#9fb0c7;border:1px solid #2c323d}
-.tabs button.on{background:#185fa5;color:#fff}
-.muted{color:#888780;font-size:12px}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
-.up{background:#3fb950} .down{background:#6e7681}
-:focus-visible{outline:2px solid #22d3ee;outline-offset:2px;border-radius:4px}
+th{text-align:left;font-size:12px;font-weight:500;color:var(--color-ink-muted);padding:8px;border-bottom:1px solid var(--color-hairline-soft)}
+td{padding:8px;border-bottom:1px solid var(--color-hairline);vertical-align:top}
+tr:last-child td{border-bottom:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:32px;min-width:32px;padding:0 12px;border-radius:var(--radius-control);font-family:inherit;font-size:13px;font-weight:500;border:1px solid transparent;cursor:pointer;transition:background 120ms ease-out,border-color 120ms ease-out,color 120ms ease-out}
+.btn--primary{background:var(--color-brand);color:#07080a}
+.btn--primary:hover{background:var(--color-brand-hover)}
+.btn--primary:active{background:var(--color-brand-active)}
+.btn--ghost{background:transparent;color:var(--color-ink-muted);border-color:var(--color-hairline-strong)}
+.btn--ghost:hover{background:var(--color-surface-2);color:var(--color-ink)}
+.btn--danger{background:var(--color-danger);color:#07080a}
+.btn--danger:hover{background:#ff8080}
+.btn--danger-outline{background:transparent;color:var(--color-danger);border-color:rgba(255,97,97,0.4)}
+.btn--danger-outline:hover{background:rgba(255,97,97,0.12)}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.input{height:36px;background:var(--color-surface-2);border:1px solid var(--color-field-border);border-radius:var(--radius-control);padding:0 12px;color:var(--color-ink);font-family:inherit;font-size:13px;min-width:240px}
+.input::placeholder{color:var(--color-ink-subtle)}
+.input:focus{outline:none;border-color:var(--color-brand);box-shadow:var(--shadow-focus)}
+.search-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.bar{display:inline-block;height:8px;background:var(--color-brand);border-radius:999px;vertical-align:middle;margin-right:8px;min-width:2px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:middle}
+.dot--up{background:var(--color-success)}
+.dot--down{background:var(--color-ink-subtle)}
+.badge{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:12px}
+.badge--brand{background:var(--color-brand-soft);color:var(--color-brand)}
+.badge--semantic{background:rgba(167,139,250,0.12);color:var(--color-accent)}
+.subtle{font-size:12px;color:var(--color-ink-subtle)}
+.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--color-ink-subtle)}
+.empty{padding:48px 16px;text-align:center;color:var(--color-ink-muted)}
+.empty__hint{font-size:12px;color:var(--color-ink-subtle);margin-top:4px}
+.hit{padding:8px 0;border-bottom:1px solid var(--color-hairline)}
+.hit:last-child{border-bottom:0}
+details summary{cursor:pointer;padding:4px 0}
+:focus-visible{outline:2px solid var(--color-brand);outline-offset:2px;border-radius:4px}
 :focus:not(:focus-visible){outline:none}
+.btn:focus-visible,.tab:focus-visible{outline:none;box-shadow:var(--shadow-focus)}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @media (prefers-reduced-motion:reduce){*{transition-duration:.01ms!important;animation-duration:.01ms!important}}
+@media (max-width:768px){.container{padding:0 16px}.kpi-grid{grid-template-columns:repeat(2,1fr)}.input{min-width:0;width:100%}}
 </style>
 <body>
-<h1>mempipeline 工作台 <span class="muted">v0.6.0 · 记忆 + 运维统一入口</span></h1>
-<nav class="tabs" role="tablist" aria-label="工作台视图切换">
-<button id="tb-memory" class="on" role="tab" aria-selected="true" aria-controls="tab-memory" onclick="tab('memory')">记忆</button>
-<button id="tb-ops" role="tab" aria-selected="false" aria-controls="tab-ops" onclick="tab('ops')">运维看板</button>
+<header class="topbar"><div class="container">
+<h1 class="display">mempipeline 工作台</h1>
+<p class="topbar__sub">本地记忆系统 · v0.6.0 · 记忆 + 运维统一入口</p>
+</div></header>
+
+<nav class="tabs container" role="tablist" aria-label="工作台视图切换">
+<button id="tb-memory" class="tab is-active" role="tab" aria-selected="true" aria-controls="tab-memory" onclick="tab('memory')">记忆</button>
+<button id="tb-ops" class="tab" role="tab" aria-selected="false" aria-controls="tab-ops" onclick="tab('ops')">运维看板</button>
 </nav>
 
-<main>
-<div id="tab-memory" role="tabpanel" aria-labelledby="tb-memory">
+<main class="container">
+<section id="tab-memory" class="panel is-active" role="tabpanel" aria-labelledby="tb-memory" tabindex="0">
+<div class="kpi-grid" id="kpi" aria-live="polite"></div>
+<h2 class="h1">分布明细</h2>
 <div class="card" id="stats" aria-live="polite">加载中…</div>
-<h2>审核队列（candidate）</h2><div class="card" id="queue" aria-live="polite">加载中…</div>
-<h2>语义检索（hybrid）</h2><div class="card">
+<h2 class="h1">审核队列（candidate）</h2>
+<div class="card" id="queue" aria-live="polite">加载中…</div>
+<h2 class="h1">语义检索（hybrid）</h2>
+<div class="card">
+<div class="search-row">
 <label for="q" class="sr-only">检索记忆关键词</label>
-<input id="q" placeholder="查询…" style="width:60%">
-<button onclick="search()">检索</button>
-<div id="sr" style="margin-top:10px" aria-live="polite"></div></div>
-<h2>审计日志</h2><div class="card" id="audit" aria-live="polite">加载中…</div>
+<input id="q" class="input" placeholder="查询…">
+<button class="btn btn--primary" onclick="search()">检索</button>
 </div>
+<div id="sr" aria-live="polite"></div>
+</div>
+<h2 class="h1">审计日志</h2>
+<div class="card" id="audit" aria-live="polite">加载中…</div>
+</section>
 
-<div id="tab-ops" role="tabpanel" aria-labelledby="tb-ops" style="display:none">
-<h2>WorkBuddy 自动化</h2><div class="card" id="opsAuto" aria-live="polite">加载中…</div>
-<h2>Windows 计划任务（零 agent 运维）</h2><div class="card" id="opsTask" aria-live="polite">加载中…</div>
-<h2>服务端口</h2><div class="card" id="opsSvc" aria-live="polite">加载中…</div>
-<h2>最新体检 / 监控报告</h2><div class="card" id="opsRep" aria-live="polite">加载中…</div>
-</div>
+<section id="tab-ops" class="panel" role="tabpanel" aria-labelledby="tb-ops" tabindex="0">
+<h2 class="h1">WorkBuddy 自动化</h2><div class="card" id="opsAuto" aria-live="polite">加载中…</div>
+<h2 class="h1">Windows 计划任务（零 agent 运维）</h2><div class="card" id="opsTask" aria-live="polite">加载中…</div>
+<h2 class="h1">服务端口</h2><div class="card" id="opsSvc" aria-live="polite">加载中…</div>
+<h2 class="h1">最新体检 / 监控报告</h2><div class="card" id="opsRep" aria-live="polite">加载中…</div>
+</section>
 </main>
 
 <script>
 async function j(u,o){const r=await fetch(u,o);return r.json()}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
-function bar(cnt,total){const w=Math.round(cnt/total*300);return `<span class="bar" style="width:${w}px"></span> ${cnt}`}
-function tab(n){document.getElementById('tab-memory').style.display=n==='memory'?'':'none';
-document.getElementById('tab-ops').style.display=n==='ops'?'':'none';
-document.getElementById('tb-memory').className=n==='memory'?'on':'';
-document.getElementById('tb-ops').className=n==='ops'?'on':'';
-document.getElementById('tb-memory').setAttribute('aria-selected',n==='memory');
-document.getElementById('tb-ops').setAttribute('aria-selected',n==='ops');
+function jstr(s){return String(s).replace(/\\\\/g,'\\\\\\\\').replace(/'/g,"\\\\'")}
+function bar(cnt,total){const w=Math.max(2,Math.round(cnt/total*120));return `<span class="bar" style="width:${w}px"></span> <span class="num">${cnt}</span>`}
+function kpi(label,value,warn){return `<div class="kpi${warn?' kpi--warn':''}"><div class="kpi__label">${esc(label)}</div><div class="kpi__value">${esc(value)}</div></div>`}
+function empty(msg,hint){return `<div class="empty">${esc(msg)}${hint?'<div class="empty__hint">'+esc(hint)+'</div>':''}</div>`}
+function tab(n){['memory','ops'].forEach(function(k){
+document.getElementById('tab-'+k).classList.toggle('is-active',k===n);
+const b=document.getElementById('tb-'+k);
+b.classList.toggle('is-active',k===n);
+b.setAttribute('aria-selected',k===n);});
 if(n==='ops')loadOps()}
 async function loadStats(){const s=await j('/api/stats');
-document.getElementById('stats').innerHTML=`<b>${s.total}</b> 篇笔记 · 审核队列 <b>${s.queue}</b><br><br>
-<table><tr><th scope="col">状态</th><th scope="col">项目</th><th scope="col">层级</th></tr><tr>
-<td>${Object.entries(s.by_status).map(([k,v])=>esc(k)+' '+bar(v,s.total)).join('<br>')}</td>
-<td>${Object.entries(s.by_project).map(([k,v])=>esc(k)+' '+v).join('<br>')}</td>
-<td>${Object.entries(s.by_tier).map(([k,v])=>esc(k)+' '+v).join('<br>')}</td></tr></table>`}
+const tiers=Object.entries(s.by_tier||{});
+document.getElementById('kpi').innerHTML=
+kpi('笔记总数',s.total)+kpi('待审队列',s.queue,s.queue>0)+
+tiers.slice(0,2).map(function(t){return kpi(t[0],t[1])}).join('');
+document.getElementById('stats').innerHTML=`<table><tr><th scope="col">状态</th><th scope="col">项目</th><th scope="col">层级</th></tr><tr>
+<td>${Object.entries(s.by_status).map(function(e){return esc(e[0])+' '+bar(e[1],s.total)}).join('<br>')}</td>
+<td>${Object.entries(s.by_project).map(function(e){return esc(e[0])+' <span class="num">'+e[1]+'</span>'}).join('<br>')}</td>
+<td>${tiers.map(function(e){return esc(e[0])+' <span class="num">'+e[1]+'</span>'}).join('<br>')}</td></tr></table>`}
 async function loadQueue(){const q=await j('/api/queue');
 document.getElementById('queue').innerHTML=q.length?`<table><tr><th scope="col">笔记</th><th scope="col">项目</th><th scope="col">操作</th></tr>`+
-q.map(n=>`<tr><td>${esc(n.title)}</td><td>${esc(n.project||'-')}</td><td>
-<button onclick="go('${esc(n.path)}','promoted')">晋升全局</button>
-<button class="danger" onclick="go('${esc(n.path)}','rejected')">拒绝</button></td></tr>`).join('')+'</table>':'<i>无待审 candidate</i>'}
-async function go(path,to){await j('/api/transition',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path,to})});loadQueue();loadStats()}
+q.map(function(n){return `<tr><td>${esc(n.title)}</td><td class="subtle">${esc(n.project||'-')}</td><td>
+<div class="btn-row"><button class="btn btn--primary" onclick="go('${jstr(n.path)}','promoted')">晋升全局</button>
+<button class="btn btn--danger-outline" onclick="go('${jstr(n.path)}','rejected')">拒绝</button></div></td></tr>`}).join('')+'</table>'
+:empty('暂无待审 candidate','记忆写入后若判定为候选，会出现在这里等待晋升')}
+async function go(path,to){await j('/api/transition',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path,to:to})});loadQueue();loadStats()}
 async function search(){const q=document.getElementById('q').value;const r=await j('/api/search?q='+encodeURIComponent(q));
-document.getElementById('sr').innerHTML=r.map(x=>`<div>${esc(x.path)} <span style="color:#888780">${x.score.toFixed(4)}</span></div>`).join('')||'<i>无结果</i>'}
+document.getElementById('sr').innerHTML=r.length?'<div style="margin-top:12px">'+r.map(function(x){return `<div class="hit">${esc(x.path)} <span class="num">${x.score.toFixed(4)}</span></div>`}).join('')+'</div>':empty('无结果','换个关键词，或确认语义索引已重建')}
 async function loadAudit(){const a=await j('/api/audit?n=30');
-document.getElementById('audit').innerHTML=`<table><tr><th scope="col">最近审计记录</th></tr>${a.map(l=>`<tr><td>${esc(l)}</td></tr>`).join('')}</table>`}
+document.getElementById('audit').innerHTML=a.length?`<table><tr><th scope="col">最近审计记录</th></tr>${a.map(function(l){return `<tr><td class="subtle">${esc(l)}</td></tr>`}).join('')}</table>`:empty('暂无审计记录')}
 async function loadOps(){const o=await j('/api/ops');
-if(o.error){const m='读取失败：'+o.error;['opsAuto','opsTask','opsSvc','opsRep'].forEach(id=>document.getElementById(id).innerHTML=esc(m));return}
+if(o.error){['opsAuto','opsTask','opsSvc','opsRep'].forEach(function(id){document.getElementById(id).innerHTML=empty('读取失败：'+o.error,'检查 workbuddy.db 是否可只读打开')});return}
 const A=o.automations.active,P=o.automations.paused;
 document.getElementById('opsAuto').innerHTML=
-`<div class="muted">生效 ${A.length} 条 · 已停用 ${P.length} 条 · 采集于 ${esc(o.generated||'')}</div>`+
+`<div class="subtle">生效 ${A.length} 条 · 已停用 ${P.length} 条 · 采集于 ${esc(o.generated||'')}</div>`+
 (A.length?`<table style="margin-top:8px"><tr><th scope="col">生效中</th><th scope="col">调度</th></tr>`+
-A.map(a=>`<tr><td>${esc(a.name)}</td><td class="muted">${esc(a.rrule||'(单次/未设)')}</td></tr>`).join('')+'</table>':'')+
-(P.length?`<details style="margin-top:8px"><summary class="muted">已停用 ${P.length} 条（展开查看）</summary>
-<table style="margin-top:6px"><tr><th scope="col">名称</th><th scope="col">状态</th></tr>`+
-P.map(a=>`<tr><td>${esc(a.name)}</td><td class="muted">${esc(a.status)}</td></tr>`).join('')+'</table></details>':'');
-document.getElementById('opsTask').innerHTML=`<table><tr><th scope="col">任务</th><th scope="col">状态</th></tr>`+
-o.tasks.map(t=>`<tr><td>${esc(t.name)}</td><td class="muted">${esc(t.state)}</td></tr>`).join('')+'</table>';
-document.getElementById('opsSvc').innerHTML=`<table><tr><th scope="col">服务</th><th scope="col">端口</th><th scope="col">状态</th></tr>`+
-o.services.map(s=>`<tr><td>${esc(s.name)}</td><td class="muted">${s.port}</td>
-<td><span class="dot ${s.online?'up':'down'}" aria-hidden="true"></span>${s.online?'在线':'离线'}</td></tr>`).join('')+'</table>';
+A.map(function(a){return `<tr><td>${esc(a.name)}</td><td class="subtle">${esc(a.rrule||'(单次/未设)')}</td></tr>`}).join('')+'</table>':'')+
+(P.length?`<details style="margin-top:8px"><summary class="subtle">已停用 ${P.length} 条（展开查看）</summary>
+<table style="margin-top:8px"><tr><th scope="col">名称</th><th scope="col">状态</th></tr>`+
+P.map(function(a){return `<tr><td>${esc(a.name)}</td><td class="subtle">${esc(a.status)}</td></tr>`}).join('')+'</table></details>':'');
+document.getElementById('opsTask').innerHTML=o.tasks.length?`<table><tr><th scope="col">任务</th><th scope="col">状态</th></tr>`+
+o.tasks.map(function(t){return `<tr><td>${esc(t.name)}</td><td class="subtle">${esc(t.state)}</td></tr>`}).join('')+'</table>':empty('未采集到计划任务');
+document.getElementById('opsSvc').innerHTML=o.services.length?`<table><tr><th scope="col">服务</th><th scope="col">端口</th><th scope="col">状态</th></tr>`+
+o.services.map(function(s){return `<tr><td>${esc(s.name)}</td><td class="num">${s.port}</td>
+<td><span class="dot ${s.online?'dot--up':'dot--down'}" aria-hidden="true"></span>${s.online?'在线':'离线'}</td></tr>`}).join('')+'</table>':empty('未配置服务探针');
 document.getElementById('opsRep').innerHTML=o.reports.length?`<table><tr><th scope="col">报告</th><th scope="col">类型</th><th scope="col">时间</th></tr>`+
-o.reports.map(r=>`<tr><td>${esc(r.name)}</td><td class="muted">${esc(r.dir)}</td><td class="muted">${esc(r.mtime)}</td></tr>`).join('')+'</table>':'<i>暂无报告</i>'}
+o.reports.map(function(r){return `<tr><td>${esc(r.name)}</td><td class="subtle">${esc(r.dir)}</td><td class="subtle">${esc(r.mtime)}</td></tr>`}).join('')+'</table>':empty('暂无报告','每周体检将在周日 09:00 自动生成')}
 loadStats();loadQueue();loadAudit();
 </script></body></html>"""
 

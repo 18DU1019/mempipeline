@@ -70,7 +70,10 @@
 | 表面 3 | `#171717` | `--color-surface-3` | 弹层、浮起元素 |
 | 描边弱 | `rgba(255,255,255,0.08)` | `--color-hairline` | 卡片默认描边 |
 | 描边中 | `#242728` | `--color-hairline-soft` | 分隔线、表格线 |
-| 描边强 | `rgba(255,255,255,0.16)` | `--color-hairline-strong` | 输入框、悬停描边 |
+| 描边强 | `rgba(255,255,255,0.16)` | `--color-hairline-strong` | 卡片悬停描边、次要按钮描边 |
+| 表单描边 | `#6b7684` | `--color-field-border` | **输入框 / 下拉等可输入控件**（见下方说明） |
+
+> **v2.1 补充（消解规范内部张力）**：`--color-hairline-strong`（`rgba(255,255,255,0.16)` 叠加后约 1.6:1）**不满足**附录 A.3「输入类控件边框 ≥ 3:1」的要求。因此表单控件一律使用专用变量 `--color-field-border: #6b7684`（实测 4.3:1），`--color-hairline-strong` 仅用于卡片 hover 与次要按钮描边等非输入场景。
 
 ### Text（文字）
 
@@ -191,8 +194,12 @@
 .btn--ghost { background: transparent; color: var(--color-ink-muted); }
 .btn--ghost:hover { background: var(--color-surface-2); color: var(--color-ink); }
 
-.btn--danger { background: var(--color-danger); color: #07080a; }
+/* 危险按钮两态，按"是不是页面上唯一的破坏性操作"选择 */
+.btn--danger { background: var(--color-danger); color: #07080a; }        /* 实心：唯一主操作（如弹窗底部"确认删除"） */
 .btn--danger:hover { background: #ff8080; }
+.btn--danger-outline { background: transparent; color: var(--color-danger);
+                       border-color: rgba(255,97,97,0.4); }               /* 描边：与主按钮并列时使用 */
+.btn--danger-outline:hover { background: rgba(255,97,97,0.12); }
 
 .btn:disabled { opacity: 0.45; pointer-events: none; }
 ```
@@ -212,7 +219,7 @@
 
 ```css
 .input { height: 36px; background: var(--color-surface-2);
-         border: 1px solid var(--color-hairline-strong);
+         border: 1px solid var(--color-field-border);   /* 表单专用，≥3:1 */
          border-radius: 6px; padding: 0 12px;
          color: var(--color-ink); font-size: 13px; }
 .input::placeholder { color: var(--color-ink-subtle); }

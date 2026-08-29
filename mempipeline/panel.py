@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""panel.py — 零依赖记忆面板（v0.5.0）：只读仪表盘 + 审核操作（http.server 标准库）。
+"""panel.py — 零依赖记忆面板（v0.6.1）：只读仪表盘 + 审核 + 浏览/投稿/索引治理。
 
 能力：
 - GET  /            → 内嵌 HTML 仪表盘（dark 主题，fetch JSON 接口）
@@ -7,8 +7,12 @@
 - GET  /api/queue   → candidate 审核队列（promoted/rejected 一键操作）
 - GET  /api/audit?n=→ 审计日志 tail N
 - GET  /api/search?q=&project=&k= → hybrid_recall（语义失败自动回落 TF-IDF）
+- GET  /api/browse?page=&limit= → 全量记忆浏览（分页，按更新时间倒序）
+- GET  /api/index_status → 语义索引 vs 镜像篇数
 - POST /api/transition {path, to} → governance.transition（仅 candidate→promoted /
   candidate→rejected，路径校验在 mem_root 内，防穿越）
+- POST /api/submit {title, content, tier, project} → 面板投稿到 staging 投稿位
+- POST /api/reindex → 一键重建语义索引
 
 安全：仅监听 127.0.0.1；transition 白名单（candidate 起点）；数据无关（路径注入）。
 """
@@ -24,6 +28,9 @@ from typing import Iterable
 
 from .governance import review_queue, transition
 from .recall import MemoryRecall
+
+# 面板投稿位（与 WorkBuddy 投稿契约一致，TRAE 端 staging_ingest.py 熔合）
+STAGING_ROOT = Path(r"H:\AI agent\_agent运行台\数据\staging\staging")
 
 try:
     from .semantic import SemanticIndex, hybrid_recall
@@ -96,6 +103,87 @@ def _audit_tail(log_path: Path, n: int = 30) -> list[str]:
         return lines[-n:]
     except Exception:
         return []
+
+
+def _browse(mem_root: Path, page: int = 1, limit: int = 50) -> dict:
+    """全量记忆浏览（分页，按更新时间倒序）。"""
+    from .protocol import TIER_DIR
+    from .recall import scan_tier_dirs
+    rows = []
+    for tier in TIER_DIR.values():
+        for d in scan_tier_dirs(mem_root, tier, None):
+            for md in d.glob("*.md"):
+                fm = _read_frontmatter(md)
+                try:
+                    mtime = md.stat().st_mtime
+                except Exception:
+                    mtime = 0.0
+                rows.append({
+                    "title": fm.get("title") or md.stem,
+                    "tier": tier,
+                    "status": fm.get("status") or "active",
+                    "updated": fm.get("updated") or "",
+                    "path": str(md),
+                    "mtime": mtime,
+                })
+    rows.sort(key=lambda r: r["mtime"], reverse=True)
+    total = len(rows)
+    start = (page - 1) * limit
+    return {"total": total, "page": page, "limit": limit,
+            "rows": rows[start:start + limit]}
+
+
+def _submit_note(title: str, body: str, tier: str, project: str,
+                 staging_root: Path) -> dict:
+    """面板直接投稿：写入 staging 投稿位（契约对齐 bridge）。
+
+    幂等：同 token+内容哈希 的既有文件不重复写。
+    """
+    from .engine import write_atomic
+    from .protocol import content_key, now_iso, title_token
+    if not title or not body:
+        return {"ok": False, "error": "标题与内容不能为空"}
+    tier = tier if tier in ("long", "medium") else "medium"
+    token = title_token(title)
+    fname = f"项目会话-{token}-{content_key(body)[:8]}.md"
+    out = staging_root / fname
+    summary = " ".join(body.strip().splitlines()[:2])[:120]
+    text = (f"---\ntype: note\ntitle: {title}\n"
+            f"summary: {summary}\n"
+            f"memory_tier: {tier}\n"
+            f"project_id: {project or ''}\n"
+            f"importance: 0.5\n"
+            f"source_staging: workbuddy-panel\n"
+            f"status: candidate\n"
+            f"updated: {now_iso()}\n---\n\n{body.strip()}\n")
+    st, _ = write_atomic(out, text, _NullAudit(), source="panel-submit")
+    return {"ok": st in ("wrote", "skipped"), "status": st,
+            "path": str(out)}
+
+
+def _index_status(index, mem_root: Path) -> dict:
+    """语义索引 vs 镜像篇数。"""
+    from .protocol import TIER_DIR
+    from .recall import scan_tier_dirs
+    total = 0
+    for tier in TIER_DIR.values():
+        for d in scan_tier_dirs(mem_root, tier, None):
+            total += len(list(d.glob("*.md")))
+    indexed = index.count() if index is not None else -1
+    return {"indexed": indexed, "mirror": total,
+            "gap": (total - indexed) if indexed >= 0 else None,
+            "enabled": index is not None}
+
+
+def _reindex(index, mem_root: Path) -> dict:
+    """一键重建语义索引（同步执行；129 篇量级约数秒）。"""
+    if index is None:
+        return {"ok": False, "error": "语义索引未启用"}
+    try:
+        index.build(mem_root)
+        return {"ok": True, "indexed": index.count()}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
 def _json(handler, obj: dict, status: int = 200) -> None:
@@ -171,6 +259,15 @@ tr:last-child td{border-bottom:0}
 .input::placeholder{color:var(--color-ink-subtle)}
 .input:focus{outline:none;border-color:var(--color-brand);box-shadow:var(--shadow-focus)}
 .search-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.textarea{width:100%;min-height:120px;background:var(--color-surface-2);border:1px solid var(--color-field-border);border-radius:var(--radius-control);padding:10px 12px;color:var(--color-ink);font-family:var(--font-sans);font-size:13px;line-height:1.6;resize:vertical}
+.textarea::placeholder{color:var(--color-ink-subtle)}
+.textarea:focus{outline:none;border-color:var(--color-brand);box-shadow:var(--shadow-focus)}
+.form-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;padding:8px 0}
+.flow__node{background:var(--color-surface-2);border:1px solid var(--color-hairline);border-radius:var(--radius-control);padding:8px 12px;min-width:96px;text-align:center}
+.flow__node b{display:block;font-size:20px;color:var(--color-ink);font-variant-numeric:tabular-nums}
+.flow__node span{font-size:11px;color:var(--color-ink-muted)}
+.flow__arrow{align-self:center;color:var(--color-ink-subtle);padding:0 6px;font-size:14px}
 .bar{display:inline-block;height:8px;background:var(--color-brand);border-radius:999px;vertical-align:middle;margin-right:8px;min-width:2px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:middle}
 .dot--up{background:var(--color-success)}
@@ -230,6 +327,7 @@ td::before{content:attr(data-label);flex:0 0 76px;color:var(--color-ink-subtle);
 <div role="tablist" aria-orientation="vertical">
 <button id="nb-overview" class="nav-item is-active" role="tab" aria-selected="true" aria-controls="view-overview" data-short="概览" onclick="view('overview')">概览</button>
 <button id="nb-memory" class="nav-item" role="tab" aria-selected="false" aria-controls="view-memory" data-short="记忆" onclick="view('memory')">记忆</button>
+<button id="nb-governance" class="nav-item" role="tab" aria-selected="false" aria-controls="view-governance" data-short="治理" onclick="view('governance')">治理</button>
 </div>
 </nav>
 </aside>
@@ -262,6 +360,32 @@ td::before{content:attr(data-label);flex:0 0 76px;color:var(--color-ink-subtle);
 <h2 class="h1">审计日志</h2>
 <div class="card" id="audit" aria-live="polite">加载中…</div>
 </section>
+
+<section id="view-governance" class="view" role="tabpanel" aria-labelledby="nb-governance" tabindex="0">
+<h2 class="h1">治理流程</h2>
+<div class="card" id="govFlow" aria-live="polite">加载中…</div>
+<h2 class="h1">语义索引</h2>
+<div class="card" id="idxStatus" aria-live="polite">加载中…</div>
+<h2 class="h1">面板投稿（写入 staging，经治理入镜像）</h2>
+<div class="card">
+<div class="form-row">
+<label for="sub-title" class="sr-only">投稿标题</label>
+<input id="sub-title" class="input" placeholder="标题" style="flex:2;min-width:200px">
+<label for="sub-tier" class="sr-only">记忆层级</label>
+<select id="sub-tier" class="input" style="flex:0 0 110px;padding:0 8px">
+<option value="long">长期</option><option value="medium" selected>中期</option>
+</select>
+</div>
+<label for="sub-content" class="sr-only">投稿内容</label>
+<textarea id="sub-content" class="textarea" placeholder="投稿内容（Markdown）"></textarea>
+<div class="btn-row" style="margin-top:8px">
+<button class="btn btn--primary" onclick="submitNote()">投稿</button>
+<span id="sub-msg" class="subtle" aria-live="polite"></span>
+</div>
+</div>
+<h2 class="h1">全部记忆</h2>
+<div class="card" id="browse" aria-live="polite">加载中…</div>
+</section>
 </div>
 </main>
 </div>
@@ -273,8 +397,8 @@ function jstr(s){return String(s).replace(/\\\\/g,'\\\\\\\\').replace(/'/g,"\\\\
 function bar(cnt,total){const w=Math.max(2,Math.round(cnt/total*120));return `<span class="bar" style="width:${w}px"></span> <span class="num">${cnt}</span>`}
 function kpi(label,value,warn){return `<div class="kpi${warn?' kpi--warn':''}"><div class="kpi__label">${esc(label)}</div><div class="kpi__value">${esc(value)}</div></div>`}
 function empty(msg,hint){return `<div class="empty">${esc(msg)}${hint?'<div class="empty__hint">'+esc(hint)+'</div>':''}</div>`}
-const VIEWS=['overview','memory'];
-const META={overview:['概览','记忆资产总览 · 运维监控已迁至中枢工作台 :8791'],memory:['记忆','审核队列、语义检索与审计记录']};
+const VIEWS=['overview','memory','governance'];
+const META={overview:['概览','记忆资产总览 · 运维监控已迁至中枢工作台 :8791'],memory:['记忆','审核队列、语义检索与审计记录'],governance:['治理','流程可视化、语义索引与面板投稿']};
 function view(n){VIEWS.forEach(function(k){
 document.getElementById('view-'+k).classList.toggle('is-active',k===n);
 const b=document.getElementById('nb-'+k);
@@ -282,7 +406,8 @@ b.classList.toggle('is-active',k===n);
 b.setAttribute('aria-selected',k===n?'true':'false');});
 document.getElementById('pageTitle').textContent=META[n][0];
 document.getElementById('pageSub').textContent=META[n][1];
-if(n==='memory'){loadQueue();loadAudit()}}
+if(n==='memory'){loadQueue();loadAudit()}
+if(n==='governance'){loadGov()}}
 async function loadStats(){const s=await j('/api/stats');
 const tiers=Object.entries(s.by_tier||{});
 document.getElementById('kpi').innerHTML=
@@ -303,6 +428,41 @@ async function search(){const q=document.getElementById('q').value;const r=await
 document.getElementById('sr').innerHTML=r.length?'<div style="margin-top:12px">'+r.map(function(x){return `<div class="hit">${esc(x.path)} <span class="num">${x.score.toFixed(4)}</span></div>`}).join('')+'</div>':empty('无结果','换个关键词，或确认语义索引已重建')}
 async function loadAudit(){const a=await j('/api/audit?n=30');
 document.getElementById('audit').innerHTML=a.length?`<table><tr><th scope="col">最近审计记录</th></tr>${a.map(function(l){return `<tr><td data-label="记录" class="subtle">${esc(l)}</td></tr>`}).join('')}</table>`:empty('暂无审计记录')}
+let browsePage=1;
+async function loadGov(){const s=await j('/api/stats');const st=s.by_status||{};
+const flow=document.getElementById('govFlow');
+flow.innerHTML=`<div class="flow">
+<div class="flow__node"><b>${st.candidate||0}</b><span>候选 candidate</span></div>
+<div class="flow__arrow">→</div>
+<div class="flow__node"><b>${st.promoted||0}</b><span>晋升 promoted</span></div>
+<div class="flow__node"><b>${st.rejected||0}</b><span>拒绝 rejected</span></div>
+</div>
+<div class="subtle">活跃 ${st.active||0} 篇 · 待审 ${s.queue} 篇 · 进入治理流程的候选可在此晋升或拒绝</div>`;
+const ix=await j('/api/index_status');
+const id=document.getElementById('idxStatus');
+id.innerHTML=`<div class="form-row">
+<span class="subtle">已索引 ${ix.indexed<0?'未启用':ix.indexed} / 镜像 ${ix.mirror} 篇${ix.gap!=null?(ix.gap>0?' · <b style="color:var(--color-warning)">差 ${ix.gap} 篇</b>':' · 已同步'):''}</span>
+</div>
+<button class="btn btn--ghost" onclick="reindex()">一键重建索引</button>
+<span id="idx-msg" class="subtle" aria-live="polite"></span>`;
+loadBrowse(1)}
+async function loadBrowse(page){browsePage=page;const b=await j('/api/browse?page='+page+'&limit=50');
+const el=document.getElementById('browse');
+el.innerHTML=b.rows.length?`<div class="subtle" style="margin-bottom:8px">共 ${b.total} 篇 · 第 ${b.page} 页</div>`+
+`<table><tr><th scope="col">标题</th><th scope="col">层级</th><th scope="col">状态</th><th scope="col">更新时间</th></tr>`+
+b.rows.map(function(r){return `<tr><td data-label="标题">${esc(r.title)}</td><td data-label="层级" class="subtle">${esc(r.tier)}</td><td data-label="状态" class="subtle">${esc(r.status)}</td><td data-label="更新时间" class="subtle">${esc(r.updated||'—')}</td></tr>`}).join('')+'</table>'+
+`<div class="btn-row" style="margin-top:8px">${b.page>1?'<button class="btn btn--ghost" onclick="loadBrowse('+(b.page-1)+')">上一页</button>':''}${b.page*50<b.total?'<button class="btn btn--ghost" onclick="loadBrowse('+(b.page+1)+')">下一页</button>':''}</div>`
+:empty('暂无记忆','投稿或写入后会出现在这里')}
+async function submitNote(){const msg=document.getElementById('sub-msg');
+msg.textContent='提交中…';
+const r=await j('/api/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:document.getElementById('sub-title').value,content:document.getElementById('sub-content').value,tier:document.getElementById('sub-tier').value})});
+msg.textContent=r.ok?('已写入 '+r.path.split('/').pop()):('失败：'+r.error);
+if(r.ok){document.getElementById('sub-title').value='';document.getElementById('sub-content').value='';loadGov()}}
+async function reindex(){const msg=document.getElementById('idx-msg');
+msg.textContent='重建中（约数十秒，请勿关闭页面）…';
+const r=await j('/api/reindex',{method:'POST'});
+msg.textContent=r.ok?('重建完成：已索引 '+r.indexed+' 篇'):('失败：'+r.error);
+loadGov()}
 loadStats();
 </script></body></html>"""
 
@@ -359,6 +519,12 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 res = self._tfidf(q, k, proj)
             _json(self, [{"path": p, "score": round(s, 4)} for p, s in res])
+        elif path == "/api/browse":
+            page = int(qs.get("page", ["1"])[0])
+            limit = min(int(qs.get("limit", ["50"])[0]), 200)
+            _json(self, _browse(self.mem_root, page, limit))
+        elif path == "/api/index_status":
+            _json(self, _index_status(self.semantic_index, self.mem_root))
         else:
             _json(self, {"error": "not found"}, 404)
 
@@ -368,15 +534,23 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path != "/api/transition":
-            _json(self, {"error": "not found"}, 404)
-            return
         try:
             length = int(self.headers.get("Content-Length", 0))
-            data = json.loads(self.rfile.read(length).decode("utf-8"))
+            data = json.loads(self.rfile.read(length).decode("utf-8")) \
+                if length else {}
         except Exception:
             _json(self, {"error": "bad request"}, 400)
             return
+        if parsed.path == "/api/transition":
+            self._post_transition(data)
+        elif parsed.path == "/api/submit":
+            self._post_submit(data)
+        elif parsed.path == "/api/reindex":
+            _json(self, _reindex(self.semantic_index, self.mem_root))
+        else:
+            _json(self, {"error": "not found"}, 404)
+
+    def _post_transition(self, data: dict) -> None:
         path = Path(data.get("path", ""))
         to = data.get("to", "")
         try:
@@ -387,6 +561,13 @@ class _Handler(BaseHTTPRequestHandler):
         st, frm = transition(path, to, self.audit or _NullAudit(), source="panel")
         ok = st in ("wrote", "skipped") and frm == "candidate"
         _json(self, {"ok": ok, "status": st, "from": frm})
+
+    def _post_submit(self, data: dict) -> None:
+        r = _submit_note(data.get("title", ""), data.get("content", ""),
+                         data.get("tier", "medium"),
+                         data.get("project", ""), STAGING_ROOT)
+        _json(self, r, 200 if r.get("ok") else 400)
+
 
 
 class _NullAudit:

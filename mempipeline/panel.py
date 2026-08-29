@@ -276,8 +276,8 @@ tr:hover td{background:rgba(255,255,255,0.03)}
 .form-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
 .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;padding:8px 0}
 .flow__node{background:var(--color-surface-2);border:1px solid var(--color-hairline);border-radius:var(--radius-control);padding:10px 14px;min-width:96px;text-align:center}
-.flow__node b{display:block;font-size:20px;color:var(--color-ink);font-variant-numeric:tabular-nums}
-.flow__node span{font-size:11px;color:var(--color-ink-muted)}
+.flow__node b{display:block;font-size:22px;color:var(--color-ink);font-variant-numeric:tabular-nums}
+.flow__node span{font-size:12px;color:var(--color-ink-muted)}
 .flow__arrow{align-self:center;color:var(--color-ink-subtle);padding:0 6px;font-size:14px}
 .bar{display:inline-block;height:8px;background:linear-gradient(90deg,var(--color-brand),var(--color-success));border-radius:999px;vertical-align:middle;margin-right:8px;min-width:2px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:middle}

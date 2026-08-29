@@ -108,7 +108,10 @@ def _json(handler, obj: dict, status: int = 200) -> None:
 
 
 _PAGE = """<!DOCTYPE html>
-<html lang="zh"><meta charset="utf-8"><title>mempipeline 工作台</title>
+<html lang="zh">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mempipeline 工作台</title>
 <style>
 body{background:#11151c;color:#d3d1c7;font-family:system-ui,sans-serif;margin:0;padding:24px}
 h1{font-size:18px;font-weight:500;color:#b5d4f4} h2{font-size:14px;font-weight:500;margin-top:20px;color:#9fe1cb}
@@ -116,35 +119,46 @@ h1{font-size:18px;font-weight:500;color:#b5d4f4} h2{font-size:14px;font-weight:5
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{text-align:left;color:#888780;font-weight:500;padding:6px 8px;border-bottom:1px solid #2c323d}
 td{padding:6px 8px;border-bottom:1px solid #222834}
-button{background:#185fa5;border:0;color:#fff;border-radius:4px;padding:4px 10px;cursor:pointer;margin-right:6px}
-button.danger{background:#a32d2d} input{background:#11151c;border:1px solid #2c323d;color:#d3d1c7;border-radius:4px;padding:6px}
-.bar{display:inline-block;height:10px;background:#185fa5;border-radius:3px;vertical-align:middle}
+button{background:#185fa5;border:0;color:#fff;border-radius:4px;padding:6px 12px;min-height:28px;cursor:pointer;margin-right:6px}
+button.danger{background:#a32d2d} input{background:#11151c;border:1px solid #6b7684;color:#d3d1c7;border-radius:4px;padding:6px;min-height:28px}
+.bar{display:inline-block;height:10px;background:#2f7fd0;border-radius:3px;vertical-align:middle}
 .tabs{margin:12px 0 4px}
 .tabs button{background:#20293a;color:#9fb0c7;border:1px solid #2c323d}
 .tabs button.on{background:#185fa5;color:#fff}
 .muted{color:#888780;font-size:12px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
 .up{background:#3fb950} .down{background:#6e7681}
+:focus-visible{outline:2px solid #22d3ee;outline-offset:2px;border-radius:4px}
+:focus:not(:focus-visible){outline:none}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms!important;animation-duration:.01ms!important}}
 </style>
 <body>
 <h1>mempipeline 工作台 <span class="muted">v0.6.0 · 记忆 + 运维统一入口</span></h1>
-<div class="tabs"><button id="tb-memory" class="on" onclick="tab('memory')">记忆</button>
-<button id="tb-ops" onclick="tab('ops')">运维看板</button></div>
+<nav class="tabs" role="tablist" aria-label="工作台视图切换">
+<button id="tb-memory" class="on" role="tab" aria-selected="true" aria-controls="tab-memory" onclick="tab('memory')">记忆</button>
+<button id="tb-ops" role="tab" aria-selected="false" aria-controls="tab-ops" onclick="tab('ops')">运维看板</button>
+</nav>
 
-<div id="tab-memory">
-<div class="card" id="stats"></div>
-<h2>审核队列（candidate）</h2><div class="card" id="queue"></div>
-<h2>语义检索（hybrid）</h2><div class="card"><input id="q" placeholder="查询…" style="width:60%">
-<button onclick="search()">检索</button><div id="sr" style="margin-top:10px"></div></div>
-<h2>审计日志</h2><div class="card" id="audit"></div>
+<main>
+<div id="tab-memory" role="tabpanel" aria-labelledby="tb-memory">
+<div class="card" id="stats" aria-live="polite">加载中…</div>
+<h2>审核队列（candidate）</h2><div class="card" id="queue" aria-live="polite">加载中…</div>
+<h2>语义检索（hybrid）</h2><div class="card">
+<label for="q" class="sr-only">检索记忆关键词</label>
+<input id="q" placeholder="查询…" style="width:60%">
+<button onclick="search()">检索</button>
+<div id="sr" style="margin-top:10px" aria-live="polite"></div></div>
+<h2>审计日志</h2><div class="card" id="audit" aria-live="polite">加载中…</div>
 </div>
 
-<div id="tab-ops" style="display:none">
-<h2>WorkBuddy 自动化</h2><div class="card" id="opsAuto">加载中…</div>
-<h2>Windows 计划任务（零 agent 运维）</h2><div class="card" id="opsTask">加载中…</div>
-<h2>服务端口</h2><div class="card" id="opsSvc">加载中…</div>
-<h2>最新体检 / 监控报告</h2><div class="card" id="opsRep">加载中…</div>
+<div id="tab-ops" role="tabpanel" aria-labelledby="tb-ops" style="display:none">
+<h2>WorkBuddy 自动化</h2><div class="card" id="opsAuto" aria-live="polite">加载中…</div>
+<h2>Windows 计划任务（零 agent 运维）</h2><div class="card" id="opsTask" aria-live="polite">加载中…</div>
+<h2>服务端口</h2><div class="card" id="opsSvc" aria-live="polite">加载中…</div>
+<h2>最新体检 / 监控报告</h2><div class="card" id="opsRep" aria-live="polite">加载中…</div>
 </div>
+</main>
 
 <script>
 async function j(u,o){const r=await fetch(u,o);return r.json()}
@@ -153,15 +167,18 @@ function bar(cnt,total){const w=Math.round(cnt/total*300);return `<span class="b
 function tab(n){document.getElementById('tab-memory').style.display=n==='memory'?'':'none';
 document.getElementById('tab-ops').style.display=n==='ops'?'':'none';
 document.getElementById('tb-memory').className=n==='memory'?'on':'';
-document.getElementById('tb-ops').className=n==='ops'?'on':'';if(n==='ops')loadOps()}
+document.getElementById('tb-ops').className=n==='ops'?'on':'';
+document.getElementById('tb-memory').setAttribute('aria-selected',n==='memory');
+document.getElementById('tb-ops').setAttribute('aria-selected',n==='ops');
+if(n==='ops')loadOps()}
 async function loadStats(){const s=await j('/api/stats');
 document.getElementById('stats').innerHTML=`<b>${s.total}</b> 篇笔记 · 审核队列 <b>${s.queue}</b><br><br>
-<table><tr><th>状态</th><th>项目</th><th>层级</th></tr><tr>
+<table><tr><th scope="col">状态</th><th scope="col">项目</th><th scope="col">层级</th></tr><tr>
 <td>${Object.entries(s.by_status).map(([k,v])=>esc(k)+' '+bar(v,s.total)).join('<br>')}</td>
 <td>${Object.entries(s.by_project).map(([k,v])=>esc(k)+' '+v).join('<br>')}</td>
 <td>${Object.entries(s.by_tier).map(([k,v])=>esc(k)+' '+v).join('<br>')}</td></tr></table>`}
 async function loadQueue(){const q=await j('/api/queue');
-document.getElementById('queue').innerHTML=q.length?`<table><tr><th>笔记</th><th>项目</th><th>操作</th></tr>`+
+document.getElementById('queue').innerHTML=q.length?`<table><tr><th scope="col">笔记</th><th scope="col">项目</th><th scope="col">操作</th></tr>`+
 q.map(n=>`<tr><td>${esc(n.title)}</td><td>${esc(n.project||'-')}</td><td>
 <button onclick="go('${esc(n.path)}','promoted')">晋升全局</button>
 <button class="danger" onclick="go('${esc(n.path)}','rejected')">拒绝</button></td></tr>`).join('')+'</table>':'<i>无待审 candidate</i>'}
@@ -169,22 +186,23 @@ async function go(path,to){await j('/api/transition',{method:'POST',headers:{'Co
 async function search(){const q=document.getElementById('q').value;const r=await j('/api/search?q='+encodeURIComponent(q));
 document.getElementById('sr').innerHTML=r.map(x=>`<div>${esc(x.path)} <span style="color:#888780">${x.score.toFixed(4)}</span></div>`).join('')||'<i>无结果</i>'}
 async function loadAudit(){const a=await j('/api/audit?n=30');
-document.getElementById('audit').innerHTML=`<table><tr><th>#</th></tr>${a.map(l=>`<tr><td>${esc(l)}</td></tr>`).join('')}</table>`}
+document.getElementById('audit').innerHTML=`<table><tr><th scope="col">最近审计记录</th></tr>${a.map(l=>`<tr><td>${esc(l)}</td></tr>`).join('')}</table>`}
 async function loadOps(){const o=await j('/api/ops');
 if(o.error){const m='读取失败：'+o.error;['opsAuto','opsTask','opsSvc','opsRep'].forEach(id=>document.getElementById(id).innerHTML=esc(m));return}
 const A=o.automations.active,P=o.automations.paused;
 document.getElementById('opsAuto').innerHTML=
 `<div class="muted">生效 ${A.length} 条 · 已停用 ${P.length} 条 · 采集于 ${esc(o.generated||'')}</div>`+
-(A.length?`<table style="margin-top:8px"><tr><th>生效中</th><th>调度</th></tr>`+
+(A.length?`<table style="margin-top:8px"><tr><th scope="col">生效中</th><th scope="col">调度</th></tr>`+
 A.map(a=>`<tr><td>${esc(a.name)}</td><td class="muted">${esc(a.rrule||'(单次/未设)')}</td></tr>`).join('')+'</table>':'')+
 (P.length?`<details style="margin-top:8px"><summary class="muted">已停用 ${P.length} 条（展开查看）</summary>
-<table style="margin-top:6px">`+P.map(a=>`<tr><td>${esc(a.name)}</td><td class="muted">${esc(a.status)}</td></tr>`).join('')+'</table></details>':'');
-document.getElementById('opsTask').innerHTML=`<table><tr><th>任务</th><th>状态</th></tr>`+
+<table style="margin-top:6px"><tr><th scope="col">名称</th><th scope="col">状态</th></tr>`+
+P.map(a=>`<tr><td>${esc(a.name)}</td><td class="muted">${esc(a.status)}</td></tr>`).join('')+'</table></details>':'');
+document.getElementById('opsTask').innerHTML=`<table><tr><th scope="col">任务</th><th scope="col">状态</th></tr>`+
 o.tasks.map(t=>`<tr><td>${esc(t.name)}</td><td class="muted">${esc(t.state)}</td></tr>`).join('')+'</table>';
-document.getElementById('opsSvc').innerHTML=`<table><tr><th>服务</th><th>端口</th><th>状态</th></tr>`+
+document.getElementById('opsSvc').innerHTML=`<table><tr><th scope="col">服务</th><th scope="col">端口</th><th scope="col">状态</th></tr>`+
 o.services.map(s=>`<tr><td>${esc(s.name)}</td><td class="muted">${s.port}</td>
-<td><span class="dot ${s.online?'up':'down'}"></span>${s.online?'在线':'离线'}</td></tr>`).join('')+'</table>';
-document.getElementById('opsRep').innerHTML=o.reports.length?`<table><tr><th>报告</th><th>类型</th><th>时间</th></tr>`+
+<td><span class="dot ${s.online?'up':'down'}" aria-hidden="true"></span>${s.online?'在线':'离线'}</td></tr>`).join('')+'</table>';
+document.getElementById('opsRep').innerHTML=o.reports.length?`<table><tr><th scope="col">报告</th><th scope="col">类型</th><th scope="col">时间</th></tr>`+
 o.reports.map(r=>`<tr><td>${esc(r.name)}</td><td class="muted">${esc(r.dir)}</td><td class="muted">${esc(r.mtime)}</td></tr>`).join('')+'</table>':'<i>暂无报告</i>'}
 loadStats();loadQueue();loadAudit();
 </script></body></html>"""

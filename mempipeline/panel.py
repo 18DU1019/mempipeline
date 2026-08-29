@@ -330,8 +330,8 @@ A.map(function(a){return `<tr><td data-label="名称">${esc(a.name)}</td><td dat
 (P.length?`<details style="margin-top:8px"><summary class="subtle">已停用 ${P.length} 条（展开查看）</summary>
 <table style="margin-top:8px"><tr><th scope="col">名称</th><th scope="col">状态</th></tr>`+
 P.map(function(a){return `<tr><td data-label="名称">${esc(a.name)}</td><td data-label="状态" class="subtle">${esc(a.status)}</td></tr>`}).join('')+'</table></details>':'');
-document.getElementById('opsTask').innerHTML=o.tasks.length?`<table><tr><th scope="col">任务</th><th scope="col">状态</th></tr>`+
-o.tasks.map(function(t){return `<tr><td data-label="任务">${esc(t.name)}</td><td data-label="状态" class="subtle">${esc(t.state)}</td></tr>`}).join('')+'</table>':empty('未采集到计划任务');
+document.getElementById('opsTask').innerHTML=o.tasks.length?`<table><tr><th scope="col">任务</th><th scope="col">状态</th><th scope="col">下次运行</th></tr>`+
+o.tasks.map(function(t){return `<tr><td data-label="任务">${esc(t.name)}</td><td data-label="状态" class="subtle">${esc(t.state)}</td><td data-label="下次运行" class="subtle">${t.next_run&&t.next_run!=='N/A'?esc(t.next_run):'登录时触发'}</td></tr>`}).join('')+'</table>':empty('未采集到计划任务');
 document.getElementById('opsSvc').innerHTML=o.services.length?svcTable(o.services):empty('未配置服务探针');
 const on=o.services.filter(function(s){return s.online}).length;
 document.getElementById('ovSvc').innerHTML=o.services.length?

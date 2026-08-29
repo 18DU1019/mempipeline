@@ -1,0 +1,12 @@
+#!/bin/bash
+# pre-commit 轻量门禁：Python 语法 + 冒烟测试（见 docs/代码审查标准与流程.md）
+PY="C:/Users/Administrator/.workbuddy/binaries/python/versions/3.13.12/python.exe"
+echo "=== [pre-commit] Python 语法检查 ==="
+fail=0
+for f in $(git diff --cached --name-only --diff-filter=ACM | grep '\.py$'); do
+  "$PY" -m py_compile "$f" || fail=1
+done
+[ $fail -eq 0 ] || { echo "❌ 语法检查失败"; exit 1; }
+echo "=== [pre-commit] 冒烟测试 ==="
+"$PY" test_panel.py || { echo "❌ 测试失败"; exit 1; }
+echo "PRE_COMMIT_PASSED"

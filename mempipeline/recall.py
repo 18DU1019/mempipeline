@@ -74,16 +74,38 @@ def _raw_terms(s: str) -> list[str]:
     return [w for w in re.findall(r"[\w\u4e00-\u9fa5]+", s)]
 
 
+def scan_tier_dirs(mem_root: Path, tier: str,
+                   projects: Iterable[str] | None = None) -> list[Path]:
+    """返回某 tier 下实际要扫描的目录列表（项目作用域解析）。
+
+    projects=None → 全库：顶层 legacy 目录 + projects/ 下全部项目的同 tier 目录
+    （E1 二维化后两种布局兼容）。projects 给定 → 仅对应项目目录。
+    仅返回存在的目录；数据无关，不写死任何路径。
+    """
+    if projects is not None:
+        return [mem_root / "projects" / p / tier for p in projects
+                if (mem_root / "projects" / p / tier).is_dir()]
+    dirs = [mem_root / tier] if (mem_root / tier).is_dir() else []
+    proj_root = mem_root / "projects"
+    if proj_root.is_dir():
+        for p in sorted(proj_root.iterdir()):
+            if p.is_dir() and (p / tier).is_dir():
+                dirs.append(p / tier)
+    return dirs
+
+
 class MemoryRecall(RecallBackend):
     """查询 ngram TF-IDF 打分；synonyms 把同义词归一为主词后再匹配。"""
 
     def __init__(self, mem_root: Path, tiers: Iterable[str] | None = None,
-                 synonyms: dict[str, list[str]] | None = None):
+                 synonyms: dict[str, list[str]] | None = None,
+                 projects: Iterable[str] | None = None):
         self.mem_root = mem_root
         if tiers is None:
             from .protocol import TIER_DIR
             tiers = TIER_DIR.values()
         self.tiers = list(tiers)
+        self.projects = list(projects) if projects is not None else None
         self._norm = {}
         for head, alts in (synonyms or {}).items():
             self._norm[head] = head
@@ -114,12 +136,13 @@ class MemoryRecall(RecallBackend):
         # 保证 idf 的 df 与打分都在统一主词空间，查询/文档两侧完全对等。
         docs: list[tuple[str, str]] = []
         for tier in self.tiers:
-            for md in (self.mem_root / tier).glob("*.md"):
-                try:
-                    txt = md.read_text(encoding="utf-8")
-                except Exception:
-                    continue
-                docs.append((str(md), self._norm_doc(txt)))
+            for d in scan_tier_dirs(self.mem_root, tier, self.projects):
+                for md in d.glob("*.md"):
+                    try:
+                        txt = md.read_text(encoding="utf-8")
+                    except Exception:
+                        continue
+                    docs.append((str(md), self._norm_doc(txt)))
         idf = build_idf([t for _, t in docs])
         qfreq = Counter(qgrams)
         qmax = max(qfreq.values()) or 1.0

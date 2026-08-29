@@ -208,7 +208,7 @@ _PAGE = """<!DOCTYPE html>
 --color-glass:rgba(255,255,255,0.06);--color-glass-border:rgba(255,255,255,0.12);
 --color-hairline:rgba(255,255,255,0.08);--color-hairline-soft:#242728;--color-hairline-strong:rgba(255,255,255,0.18);
 --color-field-border:#6b7684;
---color-ink:#f4f4f6;--color-ink-body:#cdcdcd;--color-ink-muted:#9c9c9d;--color-ink-subtle:#7d7e80;
+--color-ink:#f4f4f6;--color-ink-body:#cdcdcd;--color-ink-muted:#9c9c9d;--color-ink-subtle:#8a8b8d;
 --color-brand:#22d3ee;--color-brand-hover:#67e8f9;--color-brand-active:#06b6d4;--color-brand-soft:rgba(34,211,238,0.16);
 --color-accent:#a78bfa;--color-success:#59d499;--color-warning:#ffc533;--color-danger:#ff6161;--color-info:#57c1ff;
 --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Hiragino Sans GB",Inter,sans-serif;

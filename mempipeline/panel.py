@@ -231,10 +231,6 @@ td::before{content:attr(data-label);flex:0 0 76px;color:var(--color-ink-subtle);
 <button id="nb-overview" class="nav-item is-active" role="tab" aria-selected="true" aria-controls="view-overview" data-short="概览" onclick="view('overview')">概览</button>
 <button id="nb-memory" class="nav-item" role="tab" aria-selected="false" aria-controls="view-memory" data-short="记忆" onclick="view('memory')">记忆</button>
 </div>
-<div class="nav-group-label">运维</div>
-<div role="tablist" aria-orientation="vertical">
-<button id="nb-ops" class="nav-item" role="tab" aria-selected="false" aria-controls="view-ops" data-short="运维" onclick="view('ops')">运维看板</button>
-</div>
 </nav>
 </aside>
 
@@ -242,15 +238,13 @@ td::before{content:attr(data-label);flex:0 0 76px;color:var(--color-ink-subtle);
 <div class="container">
 <header class="page-head">
 <h1 class="display" id="pageTitle">概览</h1>
-<p class="page-sub" id="pageSub">记忆资产与服务状态总览</p>
+<p class="page-sub" id="pageSub">记忆资产总览 · 运维监控已迁至中枢工作台 :8791</p>
 </header>
 
 <section id="view-overview" class="view is-active" role="tabpanel" aria-labelledby="nb-overview" tabindex="0">
 <div class="kpi-grid" id="kpi" aria-live="polite"></div>
 <h2 class="h1">分布明细</h2>
 <div class="card" id="stats" aria-live="polite">加载中…</div>
-<h2 class="h1">服务状态</h2>
-<div class="card" id="ovSvc" aria-live="polite">加载中…</div>
 </section>
 
 <section id="view-memory" class="view" role="tabpanel" aria-labelledby="nb-memory" tabindex="0">
@@ -268,13 +262,6 @@ td::before{content:attr(data-label);flex:0 0 76px;color:var(--color-ink-subtle);
 <h2 class="h1">审计日志</h2>
 <div class="card" id="audit" aria-live="polite">加载中…</div>
 </section>
-
-<section id="view-ops" class="view" role="tabpanel" aria-labelledby="nb-ops" tabindex="0">
-<h2 class="h1">WorkBuddy 自动化</h2><div class="card" id="opsAuto" aria-live="polite">加载中…</div>
-<h2 class="h1">Windows 计划任务（零 agent 运维）</h2><div class="card" id="opsTask" aria-live="polite">加载中…</div>
-<h2 class="h1">服务端口</h2><div class="card" id="opsSvc" aria-live="polite">加载中…</div>
-<h2 class="h1">最新体检 / 监控报告</h2><div class="card" id="opsRep" aria-live="polite">加载中…</div>
-</section>
 </div>
 </main>
 </div>
@@ -286,11 +273,8 @@ function jstr(s){return String(s).replace(/\\\\/g,'\\\\\\\\').replace(/'/g,"\\\\
 function bar(cnt,total){const w=Math.max(2,Math.round(cnt/total*120));return `<span class="bar" style="width:${w}px"></span> <span class="num">${cnt}</span>`}
 function kpi(label,value,warn){return `<div class="kpi${warn?' kpi--warn':''}"><div class="kpi__label">${esc(label)}</div><div class="kpi__value">${esc(value)}</div></div>`}
 function empty(msg,hint){return `<div class="empty">${esc(msg)}${hint?'<div class="empty__hint">'+esc(hint)+'</div>':''}</div>`}
-function svcTable(list){return `<table><tr><th scope="col">服务</th><th scope="col">端口</th><th scope="col">状态</th></tr>`+
-list.map(function(s){return `<tr><td data-label="服务">${esc(s.name)}</td><td data-label="端口" class="num">${s.port}</td>
-<td data-label="状态"><span class="dot ${s.online?'dot--up':'dot--down'}" aria-hidden="true"></span>${s.online?'在线':'离线'}</td></tr>`}).join('')+'</table>'}
-const VIEWS=['overview','memory','ops'];
-const META={overview:['概览','记忆资产与服务状态总览'],memory:['记忆','审核队列、语义检索与审计记录'],ops:['运维看板','自动化、计划任务、服务端口与体检报告']};
+const VIEWS=['overview','memory'];
+const META={overview:['概览','记忆资产总览 · 运维监控已迁至中枢工作台 :8791'],memory:['记忆','审核队列、语义检索与审计记录']};
 function view(n){VIEWS.forEach(function(k){
 document.getElementById('view-'+k).classList.toggle('is-active',k===n);
 const b=document.getElementById('nb-'+k);
@@ -298,8 +282,7 @@ b.classList.toggle('is-active',k===n);
 b.setAttribute('aria-selected',k===n?'true':'false');});
 document.getElementById('pageTitle').textContent=META[n][0];
 document.getElementById('pageSub').textContent=META[n][1];
-if(n==='memory'){loadQueue();loadAudit()}
-if(n==='ops'){loadOps()}}
+if(n==='memory'){loadQueue();loadAudit()}}
 async function loadStats(){const s=await j('/api/stats');
 const tiers=Object.entries(s.by_tier||{});
 document.getElementById('kpi').innerHTML=
@@ -320,26 +303,7 @@ async function search(){const q=document.getElementById('q').value;const r=await
 document.getElementById('sr').innerHTML=r.length?'<div style="margin-top:12px">'+r.map(function(x){return `<div class="hit">${esc(x.path)} <span class="num">${x.score.toFixed(4)}</span></div>`}).join('')+'</div>':empty('无结果','换个关键词，或确认语义索引已重建')}
 async function loadAudit(){const a=await j('/api/audit?n=30');
 document.getElementById('audit').innerHTML=a.length?`<table><tr><th scope="col">最近审计记录</th></tr>${a.map(function(l){return `<tr><td data-label="记录" class="subtle">${esc(l)}</td></tr>`}).join('')}</table>`:empty('暂无审计记录')}
-async function loadOps(){const o=await j('/api/ops');
-if(o.error){['opsAuto','opsTask','opsSvc','opsRep','ovSvc'].forEach(function(id){document.getElementById(id).innerHTML=empty('读取失败：'+o.error,'检查 workbuddy.db 是否可只读打开')});return}
-const A=o.automations.active,P=o.automations.paused;
-document.getElementById('opsAuto').innerHTML=
-`<div class="subtle">生效 ${A.length} 条 · 已停用 ${P.length} 条 · 采集于 ${esc(o.generated||'')}</div>`+
-(A.length?`<table style="margin-top:8px"><tr><th scope="col">生效中</th><th scope="col">调度</th></tr>`+
-A.map(function(a){return `<tr><td data-label="名称">${esc(a.name)}</td><td data-label="调度" class="subtle">${esc(a.rrule||'(单次/未设)')}</td></tr>`}).join('')+'</table>':'')+
-(P.length?`<details style="margin-top:8px"><summary class="subtle">已停用 ${P.length} 条（展开查看）</summary>
-<table style="margin-top:8px"><tr><th scope="col">名称</th><th scope="col">状态</th></tr>`+
-P.map(function(a){return `<tr><td data-label="名称">${esc(a.name)}</td><td data-label="状态" class="subtle">${esc(a.status)}</td></tr>`}).join('')+'</table></details>':'');
-document.getElementById('opsTask').innerHTML=o.tasks.length?`<table><tr><th scope="col">任务</th><th scope="col">状态</th><th scope="col">下次运行</th></tr>`+
-o.tasks.map(function(t){return `<tr><td data-label="任务">${esc(t.name)}</td><td data-label="状态" class="subtle">${esc(t.state)}</td><td data-label="下次运行" class="subtle">${t.next_run&&t.next_run!=='N/A'?esc(t.next_run):'登录时触发'}</td></tr>`}).join('')+'</table>':empty('未采集到计划任务');
-document.getElementById('opsSvc').innerHTML=o.services.length?svcTable(o.services):empty('未配置服务探针');
-const on=o.services.filter(function(s){return s.online}).length;
-document.getElementById('ovSvc').innerHTML=o.services.length?
-`<div class="subtle">${on} / ${o.services.length} 项服务在线</div><div style="margin-top:8px">`+svcTable(o.services)+'</div>'
-:empty('未配置服务探针');
-document.getElementById('opsRep').innerHTML=o.reports.length?`<table><tr><th scope="col">报告</th><th scope="col">类型</th><th scope="col">时间</th></tr>`+
-o.reports.map(function(r){return `<tr><td data-label="报告">${esc(r.name)}</td><td data-label="类型" class="subtle">${esc(r.dir)}</td><td data-label="时间" class="subtle">${esc(r.mtime)}</td></tr>`}).join('')+'</table>':empty('暂无报告','每周体检将在周日 09:00 自动生成')}
-loadStats();loadOps();
+loadStats();
 </script></body></html>"""
 
 

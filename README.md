@@ -79,6 +79,41 @@ ingest(
 - **Data-decoupled** — `protocol` owns the frontmatter contract; every path
   is injected. Nothing here knows your vault.
 
+## Time-dimension graph (P2)
+
+`mempipeline.timegrap` is a **read-only** scanner that clusters notes into
+timelines and traces how a topic evolves over time.
+
+- **Subject clustering** - `subject_key(title)` normalizes a title into a
+  stable cluster key (strips whitespace / punctuation / stop chars), so the
+  same topic keeps one theme even when titles differ in wording or
+  punctuation. Summaries never participate in the key, so *drifted*
+  notes (whose conclusion changed) still land in the same timeline and
+  can be seen as drift.
+- **Timeline playback** - each cluster yields a chronologically ascending
+  `TopicTimeline`; `recall()` returns the paths in time order,
+  `spans_days()` gives the span.
+- **Evolution signals** - per node, derived read-only: `first` /
+  `continued` / `revived` (gap >= `gap_days`, default 90) / `same_day`, plus
+  a `relation` of `duplicate` / `drift` / `stable` from bigram-Jaccard
+  summary similarity against the previous note (thresholds
+  `dup_threshold` / `drift_threshold`, both configurable and recorded on
+  each signal).
+- **Time benchmark fallback** - `updated`/`created` frontmatter win; missing
+  fields fall back to file mtime with an explicit `time_src` tag for
+  auditability.
+- **Project isolation** - pass `projects=[...]` to constrain the scan; no
+  cross-project leakage.
+
+Example:
+
+```python
+from mempipeline.timegrap import build_timeline
+timelines = build_timeline(mem_root)          # {subject_key: TopicTimeline}
+for sk, tl in timelines.items():
+    print(sk, tl.spans_days(), [sig["flag"] for sig in tl.signals])
+```
+
 ---
 
 ## 中文使用说明

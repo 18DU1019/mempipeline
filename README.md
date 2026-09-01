@@ -97,7 +97,7 @@ ingest(
 
 ### 快速接入（四步）
 
-1. **配置路径**：复制 `config.example.py` 为 `config.py`，改 `MEM_ROOT` / `STAGING_DIR` / `AUDIT_LOG` / `MANIFEST` / `TIER_DIRS`。
+1. **配置路径**：复制 `config.example.py` 为 `config.py`，改 `MEM_ROOT` / `STAGING_DIR` / `STAGING_ROOT` / `AUDIT_LOG` / `MANIFEST` / `TIER_DIRS`。其中 `STAGING_ROOT` 为面板投稿位根，缺省回落 `MEMPIPELINE_STAGING` 环境变量或中性默认值；`config.py` 已被 `.gitignore` 排除，仅 `config.example.py` 样例入库。
 2. **写者**（蒸馏进镜像）：
    ```python
    from pathlib import Path

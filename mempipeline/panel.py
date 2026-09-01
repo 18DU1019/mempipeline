@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import urllib.parse
@@ -30,7 +31,19 @@ from .governance import review_queue, transition
 from .recall import MemoryRecall
 
 # 面板投稿位（与 WorkBuddy 投稿契约一致，TRAE 端 staging_ingest.py 熔合）
-STAGING_ROOT = Path(r"runtime/staging")
+def _resolve_staging_root() -> Path:
+    """面板投稿位根：可选本地 config（gitignored 的 config.py）→ 环境变量 → 中性默认。
+
+    真实部署路径不入库；本仓库开源不泄个人绝对路径。
+    """
+    try:
+        from config import STAGING_ROOT  # type: ignore
+        return Path(STAGING_ROOT)
+    except Exception:
+        return Path(os.environ.get("MEMPIPELINE_STAGING") or "runtime/staging")
+
+
+STAGING_ROOT = _resolve_staging_root()
 
 try:
     from .semantic import SemanticIndex, hybrid_recall

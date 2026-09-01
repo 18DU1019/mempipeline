@@ -23,11 +23,12 @@ from .audit import AuditBackend
 from .recall import scan_tier_dirs
 
 # --- 状态机定义 ---
-STATES = {"draft", "project", "candidate", "promoted", "archived", "rejected"}
+STATES = {"draft", "active", "project", "candidate", "promoted", "archived", "rejected"}
 # vault 兼容映射：资产化导出时 promoted → active（vault 白名单为 active/draft/archived）
 VAULT_STATUS_MAP = {"promoted": "active", "draft": "draft", "archived": "archived"}
 VALID_TRANSITIONS = {
     "draft": {"project", "rejected"},          # 投稿过过滤 → 项目域 / 拒绝
+    "active": {"project", "candidate", "rejected"}, # Note 默认写入态，可入治理链
     "project": {"candidate", "archived", "rejected"},  # AI 判别标记候选 / 归档 / 拒绝
     "candidate": {"promoted", "rejected", "project"},  # 审核晋升全局 / 拒绝 / 退回项目
     "promoted": {"archived", "rejected"},      # 低分衰减归档 / 人工下架

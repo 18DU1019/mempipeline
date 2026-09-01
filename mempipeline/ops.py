@@ -2,7 +2,7 @@
 """ops.py — 运维数据聚合（零依赖标准库）。
 
 ⚠️ DEPRECATED（2026-08-29 剥离决策）：运维监控职责已迁至独立的中枢
-工作台（<hub-dir>，:8791）。本模块与 /api/ops
+工作台（独立 hub 服务，:8791）。本模块与 /api/ops
 路由暂时保留以保证可回滚，面板 UI 已不再展示运维内容；确认稳定后
 可在后续版本移除。
 
@@ -20,9 +20,9 @@ import subprocess
 import time
 from pathlib import Path
 
-# 本机常量（可用参数覆盖，便于测试）
-WORKWUDDY_DB = Path(r"runtime/workbuddy.db")
-REPORTS_DIR = Path(r"runtime/reports")
+# 运行时路径（开源不含个人绝对路径；真实值经调用方参数注入）
+WORKWUDDY_DB = Path.home() / ".workbuddy" / "workbuddy.db"
+REPORTS_DIR = Path("runtime/reports")
 TASK_KEYWORDS = ("mempipeline", "onequant_health", "ragflow_health",
                  "ollama_update", "draft_stats")
 SERVICES = [("mempipeline 面板", 8790), ("OneQuant signal_review", 5001),

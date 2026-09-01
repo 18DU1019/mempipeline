@@ -1,6 +1,6 @@
 #!/bin/bash
 # pre-commit 轻量门禁：Python 语法 + 冒烟测试（见 docs/代码审查标准与流程.md）
-PY="<local-python>"
+PY="${PYTHON:-python}"  # 可移植；真实解释器用环境变量 PYTHON 注入
 echo "=== [pre-commit] Python 语法检查 ==="
 fail=0
 for f in $(git diff --cached --name-only --diff-filter=ACM | grep '\.py$'); do

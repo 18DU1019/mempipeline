@@ -28,7 +28,7 @@ import re
 from pathlib import Path
 from typing import Callable, Iterable
 
-from .protocol import _fmt_scalar, content_key, now_iso, strip_frontmatter, title_token
+from .protocol import _fmt_scalar, content_key, now_iso, safe_project_id, strip_frontmatter, title_token
 from .engine import write_atomic
 from .audit import AuditBackend
 from .recall import scan_tier_dirs
@@ -116,7 +116,7 @@ def export_promoted(mem_root: Path, vault_root: Path,
                 fm = vault_frontmatter(note)
                 body = note.get("_body") or ""
                 text = fm + "\n\n" + body + "\n"
-                pid = note.get("project_id")
+                pid = safe_project_id(note.get("project_id"))
                 domain = note.get("domain")
                 if domain == "global" or not pid:
                     out_dir = vault_root / EXPORT_ROOT / "global"

@@ -28,6 +28,10 @@ def _now() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
+def _now_iso() -> str:
+    return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
 class AuditBackend(ABC):
     @abstractmethod
     def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None) -> dict:
@@ -94,8 +98,38 @@ class FileAudit(AuditBackend):
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(f"| {rel} | {kind} | {source} | {(rec['hash'] or '-')[:12]} | {chg} |\n")
         m = self._load()
-        m.setdefault("files", {})[rel] = {"kind": kind, "source": source, "hash": rec["hash"]}
+        prev = m.setdefault("files", {}).get(rel, {})
+        m.setdefault("files", {})[rel] = {
+            "kind": kind,
+            "source": source,
+            "hash": rec["hash"],
+            "trace": prev.get("trace", []),
+        }
         self._save(m)
         if self._git_add is not None:
             self._git_add(rel)
         return rec
+
+    def trace(self, path: Path, from_state: str, to_state: str,
+              reason: str, source: str = "governance") -> dict:
+        """登记一次状态转移轨迹（append-only）：from → to + 自动 reason。
+
+        P1 自动化审计：转移轨迹由系统在转移时自动记录，人工无需填"为什么"。
+        写进 manifest 的该文件 trace 列表，与 mark 复用的持久化格式兼容。
+        """
+        rel = self._rel(path)
+        rec = {"at": _now_iso(), "from": from_state, "to": to_state,
+               "reason": reason, "hash": sha256(path) if path.exists() else None}
+        m = self._load()
+        m.setdefault("files", {}).setdefault(rel, {})
+        m["files"][rel]["trace"] = m["files"][rel].get("trace", []) + [rec]
+        self._save(m)
+        return rec
+
+    def lifecycle(self, rel: str) -> list[dict]:
+        """还原一条记忆的完整状态转移轨迹（按发生顺序）。无记录返回空表。
+
+        支撑"5 分钟内从审计轨迹还原任意一条记忆完整生命周期"的验收信号。
+        """
+        m = self._load()
+        return list(m.get("files", {}).get(rel, {}).get("trace", []))

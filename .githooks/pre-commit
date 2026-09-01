@@ -1,5 +1,7 @@
 #!/bin/bash
-# pre-commit 轻量门禁：Python 语法 + 冒烟测试（见 docs/代码审查标准与流程.md）
+# pre-commit 轻量门禁：Python 语法 + 隐私驻点（硬编码路径/密钥） + 冒烟测试
+# 隐私扫描复用开源 SOP 阶段1第5类规则：拦截硬编码绝对磁盘路径与内联密钥，
+# 占位符（your-xxx / example / placeholder / <> 等）视为合法配置样例白名单放行。
 PY="${PYTHON:-python}"  # 可移植；真实解释器用环境变量 PYTHON 注入
 echo "=== [pre-commit] Python 语法检查 ==="
 fail=0
@@ -7,6 +9,39 @@ for f in $(git diff --cached --name-only --diff-filter=ACM | grep '\.py$'); do
   "$PY" -m py_compile "$f" || fail=1
 done
 [ $fail -eq 0 ] || { echo "❌ 语法检查失败"; exit 1; }
+echo "=== [pre-commit] 隐私驻点（硬编码路径/密钥）==="
+files=$(git diff --cached --name-only --diff-filter=ACM)
+if [ -n "$files" ]; then
+  IFS=$'\n' read -r -d '' -a FLIST <<< "$files"
+  "$PY" - "${FLIST[@]}" <<'PYEOF'
+import re, sys
+drive = re.compile(r"(?i)\b[a-z]:[\\/]")
+sec = re.compile(r"""(?i)(token|api[_-]?key|secret|password|passwd|auth)\s*[=:]\s*["']([^"'\r\n]{8,})["']""")
+ph = re.compile(r"(?i)(your-|example|placeholder|x{3,}|here|<|>)")  # 占位符白名单
+hits = 0
+for rel in sys.argv[1:]:
+    try:
+        data = open(rel, encoding="utf-8", errors="replace").read()
+    except OSError:
+        continue
+    for i, line in enumerate(data.splitlines(), 1):
+        flag = None
+        if drive.search(line):
+            flag = "硬编码绝对磁盘路径"
+        else:
+            m = sec.search(line)
+            if m and not ph.search(m.group(2)):
+                flag = "疑似内联密钥"
+        if flag:
+            print(f"  [隐私] {rel}:{i} ({flag}) {line.strip()[:80]}")
+            hits += 1
+print("PRE_COMMIT_PRIVACY:", "PASS" if hits == 0 else f"FAIL({hits})")
+sys.exit(1 if hits else 0)
+PYEOF
+  [ $? -eq 0 ] || { echo "❌ 隐私驻点拦截：请脱敏后再提交（可参照 config.example.py 占位符写法）"; exit 1; }
+else
+  echo "（无暂存文件，跳过）"
+fi
 echo "=== [pre-commit] 冒烟测试 ==="
 "$PY" test_panel.py || { echo "❌ 测试失败"; exit 1; }
 echo "PRE_COMMIT_PASSED"

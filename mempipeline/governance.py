@@ -145,6 +145,11 @@ def transition(note_path: Path, to_state: str, audit: AuditBackend,
         return "skipped", cur
     st, _ = write_atomic(note_path, new_text, audit, source=source,
                          skip_if_same=False)
+    if st in ("wrote", "skipped"):
+        # P1 自动化审计：转移轨迹由系统自动登记，reason 自动生成，免人工填写
+        audit.trace(note_path, cur, to_state,
+                    reason=f"auto:transition {cur}→{to_state} via {source}",
+                    source=source)
     return st, cur
 
 
@@ -174,3 +179,67 @@ def review_queue(mem_root: Path, tiers: Iterable[str] | None = None,
 def vault_status(status: str) -> str:
     """资产化导出映射：promoted→active（vault 白名单兼容，G8）。"""
     return VAULT_STATUS_MAP.get(status, status)
+
+def _read_fm_value(fm: str, key: str) -> str | None:
+    """从 frontmatter 文本读某字段的标量值（剥外层引号），缺省 None。"""
+    import re as _re
+    mm = _re.search(r"(?m)^\s*" + key + r":\s*(.+?)\s*$", fm)
+    if not mm:
+        return None
+    return mm.group(1).strip().strip(chr(34) + chr(39))
+
+def scan_stale_notes(mem_root: Path, tiers: Iterable[str] | None = None,
+                     projects: Iterable[str] | None = None,
+                     threshold: float = ARCHIVE_THRESHOLD) -> list[dict]:
+    """P1 质量扫描：自动标记旧/冷/冗余候选，只出清单、不自动改状态。
+
+    遍历各 tier 笔记，按 stale_days 与 score_note 算（旧度、评分），把 score
+    低于 threshold 且处于活跃态（非 archived/rejected）的笔记列为"建议归档"
+    候选。返回结构化清单；**不执行任何 transition**——人工只在最终裁决点
+    （晋升/归档）出现一次，其余全部由系统兜底。
+
+    返回字段：{path, status, stale_days, score, suggestion}。
+    """
+    from .protocol import TIER_DIR
+    from .recall import scan_tier_dirs
+    if tiers is None:
+        tiers = TIER_DIR.values()
+    out: list[dict] = []
+    for tier in tiers:
+        for d in scan_tier_dirs(mem_root, tier, projects):
+            for md in sorted(d.glob("*.md")):
+                try:
+                    txt = md.read_text(encoding="utf-8")
+                except Exception:
+                    continue
+                m = _FM_RE.match(txt)
+                if not m:
+                    continue
+                fm = m.group(1)
+                status = _read_fm_value(fm, "status") or "active"
+                if status in ("archived", "rejected"):
+                    continue  # 终态/归档态不重复提醒
+                updated = _read_fm_value(fm, "updated") or None
+                days = stale_days(updated)
+                imp = _roz_importance(fm)
+                score = score_note(importance=imp, days_since_active=days)
+                if score < threshold:
+                    out.append({
+                        "path": str(md),
+                        "status": status,
+                        "stale_days": days,
+                        "score": round(score, 3),
+                        "suggestion": "archive",
+                    })
+    return out
+
+
+def _roz_importance(fm: str) -> float:
+    """读 frontmatter 的 importance，缺省/异常回退 0.6。"""
+    v = _read_fm_value(fm, "importance")
+    if v is None:
+        return 0.6
+    try:
+        return float(v)
+    except ValueError:
+        return 0.6

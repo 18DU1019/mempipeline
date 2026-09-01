@@ -80,9 +80,20 @@ class Note:
 
 
 def stable_body(text: str) -> str:
-    """剔除 frontmatter 实时时间戳行（含 updated: 变体），返回幂等判定的稳定正文。"""
-    return "\n".join(ln for ln in text.splitlines()
-                     if not re.match(r"^\s*updated\s*:", ln))
+    """剔除「首个 frontmatter 块」内的 updated 实时时间戳行（含 updated: 变体）。
+
+    只处理首个 --- 块内的 updated 行，绝不触碰正文中以 updated: 开头的普通段落，
+    避免误删导致 content_key 失真（更少误撞）。无 frontmatter 则原样返回。
+    """
+    m = re.match(r"^---\s*\n.*?\n---\s*\n?", text, re.S)
+    if not m:
+        return text
+    fm = m.group(0)
+    stripped = "\n".join(
+        ln for ln in fm.splitlines()
+        if not re.match(r"^\s*updated\s*:", ln)
+    )
+    return stripped + text[m.end():]
 
 
 def strip_frontmatter(text: str) -> str:
@@ -94,7 +105,27 @@ def strip_frontmatter(text: str) -> str:
 
 
 def content_key(text: str) -> str:
-    return hashlib.sha256(stable_body(text).encode("utf-8")).hexdigest()[:8]
+    return hashlib.sha256(stable_body(text).encode("utf-8")).hexdigest()[:12]
+
+
+_SAFE_PROJECT_RE = re.compile(r"^[\w.-]+$")
+
+
+def safe_project_id(pid) -> str | None:
+    """安全化 project_id：只放行安全字符集，拒绝路径穿越/绝对路径。
+
+    用于把用户可控 project_id 拼接到写盘路径前的筛。非法值返回 None，
+    由调用方回落（legacy/global），而不是拒绝整条信息——保持幂等可用。
+    """
+    if not pid:
+        return None
+    if not isinstance(pid, str):
+        pid = str(pid)
+    if "\\" in pid or "/" in pid or ".." in pid:
+        return None
+    if not _SAFE_PROJECT_RE.fullmatch(pid):
+        return None
+    return pid
 
 
 def title_token(title: str) -> str:

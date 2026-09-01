@@ -12,5 +12,8 @@ STAGING_DIR = Path(r"./example_data/staging")
 AUDIT_LOG = Path(r"./example_data/audit/log.md")
 MANIFEST = Path(r"./example_data/audit/manifest.json")
 
+# 面板投稿位根（panel.STAGING_ROOT 运行时真值；留空回落环境变量/中性默认）
+STAGING_ROOT = Path(r"./example_data/staging")
+
 # 层目录映射（相对 MEM_ROOT）
 TIER_DIRS = {"long": "01-长期记忆", "medium": "02-中期记忆"}

@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from .protocol import DEFAULT_TIER, TIER_DIR, Note, content_key, strip_frontmatter, title_token
+from .protocol import DEFAULT_TIER, TIER_DIR, Note, content_key, safe_project_id, strip_frontmatter, title_token
 from .engine import write_atomic
 from .audit import AuditBackend
 
@@ -69,7 +69,7 @@ def ingest(staging_dir: Path, mem_root: Path, tier_dirs: dict[str, str] | None,
     for src in sorted(staging_dir.glob("**/*.md")):
         raw = src.read_text(encoding="utf-8")
         fm = _parse_fm(raw)
-        project_id = fm.get("project_id")
+        project_id = safe_project_id(fm.get("project_id"))
         if require_project and not project_id:
             (log or print)(f"  !! 拒绝（无 project_id）：{src.name}")
             stats["rejected"] += 1

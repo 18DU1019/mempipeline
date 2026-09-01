@@ -119,7 +119,7 @@ class SemanticIndex:
                         txt = md.read_text(encoding="utf-8")
                     except Exception:
                         continue
-                    rel = str(md.resolve())
+                    rel = str(md)  # 与 recall._recall 主键一致，RRF 融合不再分叉
                     proj = md.relative_to(mem_root).parts[1] \
                         if "projects" in md.relative_to(mem_root).parts else ""
                     docs.append((rel, txt, tier, proj))

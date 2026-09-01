@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 from mempipeline.audit import FileAudit  # noqa: E402
 from mempipeline.governance import (  # noqa: E402
     filter_note, score_note, stale_days, transition, review_queue, vault_status,
-    VALID_TRANSITIONS,
+    scan_stale_notes, VALID_TRANSITIONS,
 )
 from mempipeline.protocol import Note, TIER_DIR  # noqa: E402
 from mempipeline.engine import write_atomic  # noqa: E402
@@ -107,6 +107,68 @@ def main() -> bool:
     # 状态机拓扑完整性
     check("promoted" in VALID_TRANSITIONS["candidate"], "candidate→promoted 合法")
     check("rejected" in VALID_TRANSITIONS["candidate"], "candidate→rejected 合法")
+
+    # ---- 6. P1 自动化审计：状态转移轨迹自动登记 + 生命周期还原 ----
+    print("== P1 自动化审计 ==")
+    with tempfile.TemporaryDirectory() as td2:
+        tmp2 = Path(td2)
+        mem2 = tmp2 / "mem"
+        (mem2 / TIER_DIR["long"]).mkdir(parents=True)
+        aud2 = FileAudit(tmp2 / "audit" / "log.md", tmp2 / "audit" / "manifest.json", mem2)
+        note_a = Note(title="轨迹", summary="审计还原", tier="long", importance=0.9,
+                      body="正文。", status="draft")
+        out_a = mem2 / TIER_DIR["long"] / "轨迹-abcd1234ef.md"
+        write_atomic(out_a, note_a.to_frontmatter() + "\n\n" + note_a.body + "\n", aud2)
+
+        # 连续状态迁移：draft→project→candidate→promoted
+        for to in ("project", "candidate", "promoted"):
+            st, _ = transition(out_a, to, aud2)
+            check(st in ("wrote", "skipped"), f"P1: 迁移到 {to} 成功（{st}）")
+
+        # 轨迹还原：能按发生顺序还原完整生命周期
+        rel_a = str(out_a.resolve().relative_to(mem2.resolve())).replace("\\", "/")
+        life = aud2.lifecycle(rel_a)
+        seq = [(e.get("from"), e.get("to")) for e in life]
+        check(seq == [("draft", "project"), ("project", "candidate"), ("candidate", "promoted")],
+              f"P1: 生命周期轨迹按序还原（{seq}）")
+        check(all("auto:transition" in (e.get("reason") or "") for e in life),
+              "P1: 转移轨迹 reason 由系统自动生成（免人工填写）")
+        # 良性验证：同一笔记再走 promoted→archived，轨迹追加而非覆盖
+        st, _ = transition(out_a, "archived", aud2)
+        check(st in ("wrote", "skipped"), f"P1: promoted→archived 成功（{st}）")
+        life2 = aud2.lifecycle(rel_a)
+        check(len(life2) == 4 and life2[-1]["to"] == "archived",
+              "P1: 轨迹 append-only，追加而非覆盖")
+
+    # ---- 7. P1 质量扫描：scan_stale_notes 只出清单、不自动改状态 ----
+    print("== P1 质量扫描 ==")
+    with tempfile.TemporaryDirectory() as td3:
+        tmp3 = Path(td3)
+        mem3 = tmp3 / "mem"
+        (mem3 / TIER_DIR["long"]).mkdir(parents=True)
+        aud3 = FileAudit(tmp3 / "audit" / "log.md", tmp3 / "audit" / "manifest.json", mem3)
+        # 一篇旧 + 低 importance → 应进 stale 候选
+        stale_note = Note(title="旧经验", summary="久未用", tier="long", importance=0.3,
+                          body="很旧了。", status="active",
+                          updated=(datetime.now() - timedelta(days=200)).strftime("%Y-%m-%d %H:%M:%S"))
+        out_s = mem3 / TIER_DIR["long"] / "旧经验-ff00ff00ef.md"
+        write_atomic(out_s, stale_note.to_frontmatter() + "\n\n" + stale_note.body + "\n", aud3)
+        # 一篇新 + 高 importance → 不应进候选
+        fresh_note = Note(title="新记忆", summary="刚记", tier="long", importance=0.9,
+                          body="新鲜的。", status="active")
+        out_f = mem3 / TIER_DIR["long"] / "新记忆-00ff00ffee.md"
+        write_atomic(out_f, fresh_note.to_frontmatter() + "\n\n" + fresh_note.body + "\n", aud3)
+
+        cand = scan_stale_notes(mem3, threshold=0.6)
+        cand_paths = [c["path"] for c in cand]
+        check(str(out_s) in cand_paths, "P1: 旧+低分笔记进入 stale 候选清单")
+        check(str(out_f) not in cand_paths, "P1: 新+高分笔记不进入候选")
+        # 只出清单、不自动改状态（rank 完整性）
+        check(all(c["suggestion"] == "archive" for c in cand) and out_s.exists(),
+              "P1: 扫描只标记候选，不自动执行 transition（文件保留）")
+        # 结构完整性
+        check(all({"path", "status", "stale_days", "score", "suggestion"} <= set(c) for c in cand),
+              "P1: 每项候选含完整结构化字段")
 
     print("\nGOVERNANCE (E3'):", "ALL PASS" if ok else "SOME FAILED")
     return ok

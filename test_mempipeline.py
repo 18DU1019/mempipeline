@@ -243,10 +243,12 @@ def test_recall_golden() -> bool:
             "市场风险提示：今日波动加大。\n", encoding="utf-8")
 
         syn = {"仓位": ["positioning"]}
-        sig = golden_check(mem_root, synonyms=syn)
+        # 注入沙盒自有 golden（不依赖全局 GOLDEN 常量，避免 GOLDEN 维护后测试崩塌）
+        own_golden = {"风险 仓位": "仓位规则", "仓位调度 分配": "仓位调度"}
+        sig = golden_check(mem_root, synonyms=syn, golden=own_golden)
         check(sig["hit_rate"] >= 2 / 3, f"命中率 = {sig['hit_rate']:.2f}")
         check(sig["passed"] is True, "passed=True（跌破红线才报错）")
-        check(len(sig["results"]) == 3, "逐条覆盖 3 条 golden")
+        check(len(sig["results"]) == len(own_golden), "逐条覆盖注入 golden 集")
         check(all(r["phase"] in ("hit", "miss") for r in sig["results"]),
               "每条都有 hit/miss 相位")
         # Act 留人：同一召回调用前后一致，check 不改任何状态

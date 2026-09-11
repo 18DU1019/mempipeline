@@ -10,7 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from .protocol import DEFAULT_TIER, TIER_DIR, Note, content_key, safe_project_id, strip_frontmatter, title_token
+from .protocol import (DEFAULT_TIER, TIER_DIR, Note, content_key, safe_project_id,
+                       strip_frontmatter, title_token, unquote)
 from .engine import write_atomic
 from .audit import AuditBackend
 
@@ -28,11 +29,9 @@ def _parse_fm(text: str) -> dict:
         mm = re.search(rf"^\s*{k}:\s*(.+)$", body, re.M)
         if not mm:
             return None
-        val = mm.group(1).strip()
-        # 契约强制双引号：剥匹配的外层引号，保留值本身
-        if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
-            val = val[1:-1]
-        return val
+        # 契约强制双引号：统一经 protocol.unquote 剥引号并反转义 DQ 序列
+        # （与 protocol._fmt_scalar 闭环）。
+        return unquote(mm.group(1).strip())
 
     out["title"] = get("title")
     out["summary"] = get("summary")

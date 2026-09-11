@@ -8,8 +8,12 @@ unlimited-reader model.** Atomic idempotent writes, a pluggable audit
 backend, and a staging ingest gate — with zero private paths baked in.
 
 `mempipeline` sits on the **writer side** of a layered Markdown memory
-mirror. Readers (recall / injection) live in the sibling library
-`distill-mem`.
+mirror. Read-side capabilities live in this same repo — ngram TF-IDF recall
+(`recall.py`), semantic hybrid retrieval (`semantic.py`), timeline graph
+(`timegrap.py`), bidirectional cross-referencing (`crossref.py`), and the
+PDCA Check signal layer (`recall_golden.py`). External distillation /
+control scripts live under the runtime scripts dir (distill / sediment /
+audit_core).
 
 ## Model
 
@@ -120,7 +124,7 @@ for sk, tl in timelines.items():
 
 ### 定位与三种身份
 
-`mempipeline` 是「1 写者 + N 投稿 + 无限读」模型的**写侧**管线。镜像是一个分层的 Markdown 目录，读者的召回/注入在兄弟库 `distill-mem`。
+`mempipeline` 是「1 写者 + N 投稿 + 无限读」模型的**写侧**管线。镜像是一个分层的 Markdown 目录；读侧能力（TF-IDF 召回 / 语义混合检索 / 时间图谱 / 交叉引用 / golden 检核）在本仓库内，外部蒸馏与控层脚本在运行台脚本目录（distill / sediment / audit_core）。
 
 | 身份 | 能力 | 通道 | 落点 |
 |---|---|---|---|
@@ -155,7 +159,7 @@ for sk, tl in timelines.items():
    ingest(staging, mem, {"long": "01-长期记忆", "medium": "02-中期记忆"},
           audit, on_ingest=lambda o: print("git add --", o))
    ```
-4. **读者**：复用兄弟库 `distill-mem` 的 `recall`/`inject` 接口即可，见该库 README。
+4. **读者**：用本仓库 `recall.MemoryRecall`（ngram TF-IDF + 同义归一）或 `semantic.hybrid_recall`（bge-m3 + RRF 融合）做召回；时间演化用 `timegrap.build_timeline`（P2）；交叉引用用 `crossref.find_related`。
 
 ### DQ 转义契约（2026-08-27 起生效）
 
@@ -182,6 +186,8 @@ importance: 0.9          # 数值字段保持裸值
 **`project_id` 安全边界**：落盘路径由 `safe_project_id` 校验，仅放行 `[\w.-]+`；含 `/`、`\`、`..` 或其它非法字符的 `project_id` 一律回落 `legacy`/`global`，防止路径穿越与绝对路径逃逸。投稿端若依赖带子目录的 `project_id`，须改用合法字符。
 
 **`content_key` 幂等判据**：稳定正文 SHA-256 截断由 8 位提高至 12 位 hex，降低碰撞概率。迁移影响：升级前已用 8 位 key 落库的笔记，重写同一正文时因 key 变化会被判为新笔记而重复写入；如有需要，可对既有笔记按稳定正文重建 key 一次，或接受单次重复后由人工清理。
+
+**`stable_body` 豁免字段（2026-09-11 P3-0 起）**：稳定正文剔除 `updated:` 与 `created:` 两行。`updated` 是实时字段，参入会让幂等失效；`created` 是后加字段（P3-0 起写者落盘前回填），参入会让存量笔记首次带 created 重写时被判为新笔记。其余 frontmatter 字段（含 `status`）参与稳定正文——一次状态迁移会改变 content_key，属设计语义：状态是实质变化，该次写回为预期写入，不适用幂等跳过。
 
 ## License
 

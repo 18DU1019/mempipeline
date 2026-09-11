@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 from typing import Iterable
 
-from .protocol import _fmt_scalar  # noqa: F401 保留 import 位（后续可直接用）
+from .protocol import _fmt_scalar, unquote
 from .engine import write_atomic
 from .audit import AuditBackend
 from .recall import scan_tier_dirs
@@ -62,26 +62,21 @@ def _title_of(md: Path) -> str:
     if m:
         mm = re.search(r"(?m)^\s*title:\s*(.+)$", m.group(1))
         if mm:
-            val = mm.group(1).strip()
-            if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
-                val = val[1:-1]
+            val = unquote(mm.group(1).strip())
             if val:
                 return val
     return md.stem
 
 
 def _links_of(text: str) -> str:
-    """读取现有 frontmatter 的 links 值（剥外层引号），无则返回空串。"""
+    """读取现有 frontmatter 的 links 值（剥引号+反转义 DQ），无则返回空串。"""
     m = _FM_RE.match(text)
     if not m:
         return ""
     mm = re.search(r"(?m)^\s*links:\s*(.+)$", m.group(1))
     if not mm:
         return ""
-    val = mm.group(1).strip()
-    if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
-        val = val[1:-1]
-    return val
+    return unquote(mm.group(1).strip())
 
 
 def _upsert_links(text: str, links: str) -> str:

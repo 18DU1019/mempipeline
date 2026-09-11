@@ -8,6 +8,11 @@
 4. 结论漂移 + 重复：summary 相似度阈值自动判别（阈值可配）
 5. 缺时间字段：updated/created 缺失回落 mtime 且打 time_src=mtime 标记（不丢笔记）
 6. 项目隔离：projects 限定作用域
+--- P3-1 新增（2026-09-11，主题键改走项目 token）---
+7. project_topic_token 提取优先级（project_id → 文件名锚定 → 标题 hex）+ WorkBuddy 内容哈希排除
+8. 层感知：跨层对（长期 vs 中期）只出时序信号，不输出 drift/duplicate
+9. 层感知回归：同层对仍正常输出 relation（防过度屏蔽）
+10. 不可达信号如实标注：horizon < gap_days 时标 revived 不可达 + 原因
 """
 import sys
 import tempfile
@@ -143,6 +148,89 @@ def main() -> bool:
               and str(mem3 / "projects" / "onequant" / "01-长期记忆" / "动线-o.md")
               not in [n.path for n in tl_dora.nodes],
               "项目隔离：onequant 不进入 dora 时间谱")
+
+    # ---- 7. P3-1 项目 token 主题键 ----
+    print("== P3-1 项目 token 主题键 ==")
+    from mempipeline.timegrap import project_topic_token
+    check(project_topic_token(title="项目约束（6165c7）") == "6165c7",
+          "标题（hex）提取 token")
+    # 用相对路径构造，避免仓库隐私门禁（.githooks/pre-commit）的硬编码盘符拦截
+    check(project_topic_token(
+        path=str(Path("mem") / "01-长期记忆" / "项目约束-6165c7.md")) == "6165c7",
+        "文件名锚定模式提取 token")
+    check(project_topic_token(
+        path=str(Path("mem") / "项目会话-9条对话协议与沟通风格硬约定-a561ad6f.md")) == "",
+        "WorkBuddy 内容哈希尾部 8hex 不被当 token（锚定模式排除）")
+    check(project_topic_token(project_id="pid-1", title="项目约束（6165c7）") == "pid-1",
+          "project_id 优先级高于标题/文件名")
+    check(subject_key("项目约束（6165c7）") == subject_key("项目会话（6165c7）"),
+          "同 hex 的长期约束与中期快照归同一主题键")
+    check(subject_key("项目约束（6165c7）").startswith("topic:"),
+          "token 路径带 topic: 前缀（与指纹回落可区分）")
+    check(subject_key("项目约束（6165c7）") != subject_key("项目约束（29e9f3）"),
+          "不同项目 token 分离（无假合并）")
+
+    # ---- 8. P3-1 跨层对不出内容关系信号 ----
+    print("== P3-1 层感知：跨层对只出时序信号 ==")
+    with tempfile.TemporaryDirectory() as td4:
+        mem4 = Path(td4) / "mem"
+        (mem4 / "01-长期记忆").mkdir(parents=True)
+        (mem4 / "02-中期记忆").mkdir(parents=True)
+        _write(mem4 / "01-长期记忆" / "项目约束-6165c7.md",
+               "项目约束（6165c7）", "约束条目", days_ago=15)
+        _write(mem4 / "02-中期记忆" / "项目会话-6165c7.md",
+               "项目会话（6165c7）", "会话流水", days_ago=0)
+        tls4 = build_timeline(mem4)
+        sk4 = subject_key("项目约束（6165c7）")
+        tl4 = tls4.get(sk4)
+        check(tl4 is not None and len(tl4.nodes) == 2,
+              "同 token 的长期约束 + 中期快照聚为一簇")
+        if tl4 is not None:
+            flags4 = [s.get("flag") for s in tl4.signals]
+            check(flags4 == ["first", "continued"], f"时序信号照常产出（{flags4}）")
+            check(all("relation" not in s for s in tl4.signals[1:]),
+                  "跨层对不输出 drift/duplicate")
+            check(tl4.signals[1].get("relation_scope") == "cross-tier",
+                  "跨层对标注 relation_scope=cross-tier")
+            check([n.tier for n in tl4.nodes] == ["01-长期记忆", "02-中期记忆"],
+                  "节点带层标记（跨层判定的依据）")
+
+    # ---- 9. P3-1 同层对仍产出内容关系（防过度屏蔽）----
+    print("== P3-1 层感知：同层对不受影响 ==")
+    with tempfile.TemporaryDirectory() as td5:
+        mem5 = Path(td5) / "mem"
+        (mem5 / "01-长期记忆").mkdir(parents=True)
+        _write(mem5 / "01-长期记忆" / "甲.md",
+               "项目约束（6165c7）", "出餐口到餐桌要短", days_ago=10)
+        _write(mem5 / "01-长期记忆" / "乙.md",
+               "项目约束（6165c7）", "出餐口到餐桌要短", days_ago=0)
+        tls5 = build_timeline(mem5)
+        tl5 = tls5.get(subject_key("项目约束（6165c7）"))
+        check(tl5 is not None and len(tl5.nodes) == 2, "同 token 同层两稿聚为一簇")
+        if tl5 is not None:
+            check(tl5.signals[1].get("relation") == "duplicate",
+                  f"同层对仍输出 relation（{tl5.signals[1].get('relation')}）")
+            check("relation_scope" not in tl5.signals[1],
+                  "同层对不标 cross-tier（未过度屏蔽）")
+
+    # ---- 10. P3-1 不可达信号如实标注 ----
+    print("== P3-1 不可达信号如实标注 ==")
+    with tempfile.TemporaryDirectory() as td6:
+        mem6 = Path(td6) / "mem"
+        (mem6 / "01-长期记忆").mkdir(parents=True)
+        (mem6 / "02-中期记忆").mkdir(parents=True)
+        _write(mem6 / "01-长期记忆" / "项目约束-6165c7.md",
+               "项目约束（6165c7）", "s", days_ago=15)
+        _write(mem6 / "02-中期记忆" / "项目会话-6165c7.md",
+               "项目会话（6165c7）", "s", days_ago=0)
+        tls6 = build_timeline(mem6)
+        tl6 = tls6.get(subject_key("项目约束（6165c7）"))
+        if tl6 is not None:
+            check(tl6.horizon_days == 15, f"horizon_days 如实计算（{tl6.horizon_days}）")
+            check(any("revived" in u for u in tl6.unreachable_signals),
+                  "跨度 15 天 < gap_days 90 → 标注 revived 不可达")
+            check("数学上不可能触发" in "".join(tl6.unreachable_signals),
+                  "标注含原因（非静默返回 0）")
 
     # ---- (bonus) summary_similarity 阈值边界 ----
     print("== 相似度阈值 ==")

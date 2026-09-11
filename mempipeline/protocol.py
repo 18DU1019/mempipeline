@@ -46,6 +46,7 @@ class Note:
     source_agent: str = "writer"
     status: str = "active"
     body: str = ""
+    created: Optional[str] = None         # P3-0：条目首次落盘时刻。🔴 当前无生产消费方（timegrap 取时间基准时 updated 优先，实测 224/224 走 updated），保留为备用基准，勿据此判断笔记年龄
     updated: Optional[str] = None
     project_id: Optional[str] = None      # E1：项目隔离维度（None=legacy/全局）
     domain: Optional[str] = None          # E1：project | global（None=legacy 推断）
@@ -75,15 +76,23 @@ class Note:
         for k, v in self.extra.items():
             val = _fmt_scalar(v) if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
             lines.append(f"{k}: {val}")
-        lines += [f"updated: {_fmt_scalar(self.updated or now_iso())}", "---"]
+        lines += [
+            f"created: {_fmt_scalar(self.created or now_iso())}",
+            f"updated: {_fmt_scalar(self.updated or now_iso())}",
+            "---",
+        ]
         return "\n".join(lines)
 
 
 def stable_body(text: str) -> str:
-    """剔除「首个 frontmatter 块」内的 updated 实时时间戳行（含 updated: 变体）。
+    """剔除「首个 frontmatter 块」内的时间戳行（updated: 与 created:）。
 
-    只处理首个 --- 块内的 updated 行，绝不触碰正文中以 updated: 开头的普通段落，
-    避免误删导致 content_key 失真（更少误撞）。无 frontmatter 则原样返回。
+    两个字段都不参与 content_key，理由分别是：
+    - updated 是实时字段，每次重写都会变，参入会让幂等失效；
+    - created 是后加字段，存量笔记没有它（2026-09-11 实测 0/225）。若参入 key，
+      存量笔记首次带 created 重写时 key 会变化，被判为新笔记而重复写入。
+      剔除后新旧口径一致，P3-0 的字段补齐不会触发存量重复。
+    只处理首个 --- 块，绝不触碰正文中以同名字段开头的普通段落。无 frontmatter 则原样返回。
     """
     m = re.match(r"^---\s*\n.*?\n---\s*\n?", text, re.S)
     if not m:
@@ -91,7 +100,7 @@ def stable_body(text: str) -> str:
     fm = m.group(0)
     stripped = "\n".join(
         ln for ln in fm.splitlines()
-        if not re.match(r"^\s*updated\s*:", ln)
+        if not re.match(r"^\s*(?:updated|created)\s*:", ln)
     )
     return stripped + text[m.end():]
 

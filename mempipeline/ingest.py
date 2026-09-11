@@ -41,6 +41,7 @@ def _parse_fm(text: str) -> dict:
     out["project_id"] = get("project_id")
     out["domain"] = get("domain")
     out["kind"] = get("kind")
+    out["created"] = get("created")
     return out
 
 
@@ -85,6 +86,7 @@ def ingest(staging_dir: Path, mem_root: Path, tier_dirs: dict[str, str] | None,
             source_agent=fm.get("source_agent") or "workbuddy",
             project_id=project_id,
             domain=fm.get("domain"),
+            created=fm.get("created"),
             body=strip_frontmatter(raw).strip(),
         )
         if fm.get("kind"):

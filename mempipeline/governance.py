@@ -180,13 +180,15 @@ def vault_status(status: str) -> str:
     """资产化导出映射：promoted→active（vault 白名单兼容，G8）。"""
     return VAULT_STATUS_MAP.get(status, status)
 
+
 def _read_fm_value(fm: str, key: str) -> str | None:
-    """从 frontmatter 文本读某字段的标量值（剥外层引号），缺省 None。"""
-    import re as _re
-    mm = _re.search(r"(?m)^\s*" + key + r":\s*(.+?)\s*$", fm)
+    """从 frontmatter 文本读某字段的标量值（剥引号+反转义 DQ），缺省 None。"""
+    from .protocol import unquote
+    mm = re.search(r"(?m)^\s*" + key + r":\s*(.+?)\s*$", fm)
     if not mm:
         return None
-    return mm.group(1).strip().strip(chr(34) + chr(39))
+    return unquote(mm.group(1).strip())
+
 
 def scan_stale_notes(mem_root: Path, tiers: Iterable[str] | None = None,
                      projects: Iterable[str] | None = None,

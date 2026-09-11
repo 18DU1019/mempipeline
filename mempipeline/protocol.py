@@ -37,6 +37,24 @@ def _fmt_scalar(v: str) -> str:
     return '"' + esc + '"'
 
 
+_DQ_ESC = {"n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}
+
+
+def unquote(v: str) -> str:
+    """剥 YAML 标量外层引号（与 _fmt_scalar 写侧契约闭环）。
+
+    双引号串按 DQ 转义反转义（`\\n`→换行等，单趟正则避免多轮 replace 顺序坑，
+    未知转义序列保留原样不丢信息）；单引号只剥引号不反转义（YAML 单引号
+    转义规则不同，值内本不该出现转义序列）。仅匹配外层成对引号，plain 标量原样。
+    """
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        quote = v[0]
+        v = v[1:-1]
+        if quote == '"':
+            v = re.sub(r"\\(.)", lambda m: _DQ_ESC.get(m.group(1), m.group(0)), v)
+    return v
+
+
 @dataclass
 class Note:
     title: str

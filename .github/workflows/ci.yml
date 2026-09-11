@@ -15,5 +15,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Run zero-dependency end-to-end suite
-        run: python test_mempipeline.py
+      - name: Syntax check (all modules + tests)
+        run: python -m py_compile mempipeline/*.py test_*.py
+      - name: Zero-dependency test suites
+        run: |
+          python test_mempipeline.py
+          python test_governance.py
+          python test_timegrap.py
+          python test_bridge.py
+          python test_panel.py
+      # test_semantic.py 依赖本地 Ollama bge-m3（127.0.0.1:11434），CI 无此服务；
+      # 其语法已在上步校验，语义回归在本地执行。

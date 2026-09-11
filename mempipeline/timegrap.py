@@ -53,6 +53,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
+import re
+
 # --- 时间维度图谱配置（显式可配置，非散埋 magic number）---
 GAP_DAYS = 90            # 断更阈值：距上一稿超过 N 天视为断更
 DRIFT_THRESHOLD = 0.15   # 结论漂移阈值：相邻摘要 bigram Jaccard 低于该值视为漂移
@@ -60,20 +62,20 @@ DUP_THRESHOLD = 0.92     # 重复阈值：相邻摘要 bigram Jaccard 高于该�
 
 
 def _read_fm(fm: str, key: str) -> str | None:
-    """从 frontmatter 读某字段标量值（剥外层引号），缺省 None。"""
-    import re
+    """从 frontmatter 读某字段标量值（剥引号+反转义 DQ），缺省 None。"""
+    from .protocol import unquote
     mm = re.search(r"(?m)^\s*" + key + r":\s*(.+?)\s*$", fm)
     if not mm:
         return None
-    return mm.group(1).strip().strip(chr(34) + chr(39))
+    return unquote(mm.group(1).strip())
 
 
-_FM_RE = __import__("re").compile(r"^---\s*\n(.*?)\n---", __import__("re").S)
+_FM_RE = re.compile(r"^---\s*\n(.*?)\n---", re.S)
 
 
 def _title_of(md: Path) -> str:
     """从 frontmatter 取 title，缺省回落文件名。"""
-    import re
+    from .protocol import unquote
     try:
         txt = md.read_text(encoding="utf-8")
     except Exception:
@@ -83,7 +85,7 @@ def _title_of(md: Path) -> str:
         fm = m.group(1)
         mm = re.search(r"(?m)^\s*title:\s*(.+)$", fm)
         if mm:
-            v = mm.group(1).strip().strip(chr(34) + chr(39))
+            v = unquote(mm.group(1).strip())
             if v:
                 return v
     return md.stem
@@ -252,38 +254,38 @@ def _fm_snippet(md: Path) -> str:
 
 
 def _summary_of(fm: str) -> str:
-    import re
+    from .protocol import unquote
     m = re.search(r"(?m)^\s*summary:\s*(.+)$", fm)
     if not m:
         return ""
-    return m.group(1).strip().strip(chr(34) + chr(39))
+    return unquote(m.group(1).strip())
 
 
 def _importance_of(fm: str) -> float:
-    import re
+    from .protocol import unquote
     m = re.search(r"(?m)^\s*importance:\s*(.+)$", fm)
     if not m:
         return 0.6
     try:
-        return float(m.group(1).strip().strip(chr(34) + chr(39)))
+        return float(unquote(m.group(1).strip()))
     except ValueError:
         return 0.6
 
 
 def _status_of(fm: str) -> str:
-    import re
+    from .protocol import unquote
     m = re.search(r"(?m)^\s*status:\s*(.+)$", fm)
     if not m:
         return "active"
-    return m.group(1).strip().strip(chr(34) + chr(39))
+    return unquote(m.group(1).strip())
 
 
 def _project_of(fm: str) -> str | None:
-    import re
+    from .protocol import unquote
     m = re.search(r"(?m)^\s*project_id:\s*(.+)$", fm)
     if not m:
         return None
-    v = m.group(1).strip().strip(chr(34) + chr(39))
+    v = unquote(m.group(1).strip())
     return v or None
 
 

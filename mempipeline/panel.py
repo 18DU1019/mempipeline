@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""panel.py — 零依赖记忆面板（v0.6.1）：只读仪表盘 + 审核 + 浏览/投稿/索引治理。
+"""panel.py — 零依赖记忆面板（v0.7.0）：只读仪表盘 + 审核 + 浏览/投稿/索引治理。
 
 能力：
 - GET  /            → 内嵌 HTML 仪表盘（dark 主题，fetch JSON 接口）
@@ -51,12 +51,6 @@ try:
 except Exception:  # 语义层可选（如依赖异常时面板仍可用）
     _HAS_SEMANTIC = False
 
-try:
-    from .ops import collect_ops
-    _HAS_OPS = True
-except Exception:  # 运维模块可选（面板降级仍可打开）
-    _HAS_OPS = False
-
 
 def _read_frontmatter(md: Path) -> dict:
     _FM = re.compile(r"^---\s*\n(.*?)\n---", re.S)
@@ -71,13 +65,11 @@ def _read_frontmatter(md: Path) -> dict:
     out = {}
 
     def get(k):
+        from .protocol import unquote
         mm = re.search(rf"(?m)^\s*{k}:\s*(.+)$", fm)
         if not mm:
             return ""
-        v = mm.group(1).strip()
-        if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
-            v = v[1:-1]
-        return v
+        return unquote(mm.group(1).strip())
 
     for k in ("title", "memory_tier", "status", "project_id", "domain", "kind",
               "source_agent", "updated", "importance"):
@@ -151,24 +143,26 @@ def _submit_note(title: str, body: str, tier: str, project: str,
     """面板直接投稿：写入 staging 投稿位（契约对齐 bridge）。
 
     幂等：同 token+内容哈希 的既有文件不重复写。
+    DQ 转义：用户可控字符串字段一律经 _fmt_scalar，与 protocol 的
+    「字符串字段一律 YAML 双引号标量」契约一致（2026-08-27 起生效）。
     """
     from .engine import write_atomic
-    from .protocol import content_key, now_iso, title_token
+    from .protocol import _fmt_scalar, content_key, now_iso, title_token
     if not title or not body:
         return {"ok": False, "error": "标题与内容不能为空"}
     tier = tier if tier in ("long", "medium") else "medium"
     token = title_token(title)
-    fname = f"项目会话-{token}-{content_key(body)[:8]}.md"
+    fname = f"项目会话-{token}-{content_key(body)}.md"
     out = staging_root / fname
     summary = " ".join(body.strip().splitlines()[:2])[:120]
-    text = (f"---\ntype: note\ntitle: {title}\n"
-            f"summary: {summary}\n"
-            f"memory_tier: {tier}\n"
-            f"project_id: {project or ''}\n"
+    text = (f"---\ntype: note\ntitle: {_fmt_scalar(title)}\n"
+            f"summary: {_fmt_scalar(summary)}\n"
+            f"memory_tier: {_fmt_scalar(tier)}\n"
+            f"project_id: {_fmt_scalar(project or '')}\n"
             f"importance: 0.5\n"
-            f"source_staging: workbuddy-panel\n"
-            f"status: candidate\n"
-            f"updated: {now_iso()}\n---\n\n{body.strip()}\n")
+            f"source_staging: {_fmt_scalar('workbuddy-panel')}\n"
+            f"status: {_fmt_scalar('candidate')}\n"
+            f"updated: {_fmt_scalar(now_iso())}\n---\n\n{body.strip()}\n")
     st, _ = write_atomic(out, text, _NullAudit(), source="panel-submit")
     return {"ok": st in ("wrote", "skipped"), "status": st,
             "path": str(out)}
@@ -351,7 +345,7 @@ td::before{content:attr(data-label);flex:0 0 76px;color:var(--color-ink-subtle);
 <aside class="sidebar">
 <div class="sidebar__brand">
 <div class="sidebar__title">mempipeline</div>
-<div class="sidebar__sub">本地记忆系统 v0.6.0</div>
+<div class="sidebar__sub">本地记忆系统 v0.7.0</div>
 </div>
 <nav class="nav" aria-label="工作台视图切换">
 <div class="nav-group-label">记忆</div>
@@ -529,14 +523,6 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/audit":
             n = int(qs.get("n", ["30"])[0])
             _json(self, _audit_tail(self.audit_log, n) if self.audit_log else [])
-        elif path == "/api/ops":
-            if _HAS_OPS:
-                try:
-                    _json(self, collect_ops())
-                except Exception as e:
-                    _json(self, {"error": f"ops 采集失败：{e}"}, 500)
-            else:
-                _json(self, {"error": "ops module unavailable"}, 503)
         elif path == "/api/search":
             q = qs.get("q", [""])[0]
             proj = qs.get("project", [None])[0]
@@ -601,9 +587,13 @@ class _Handler(BaseHTTPRequestHandler):
         _json(self, r, 200 if r.get("ok") else 400)
 
 
-
 class _NullAudit:
+    """无审计后端时的静默实现（写/跳与状态轨迹均不落库）。"""
+
     def mark(self, path, kind, source="manual", change=None):
+        return {}
+
+    def trace(self, path, from_state, to_state, reason, source="governance"):
         return {}
 
 

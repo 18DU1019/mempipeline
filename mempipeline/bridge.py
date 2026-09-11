@@ -28,7 +28,7 @@ import re
 from pathlib import Path
 from typing import Callable, Iterable
 
-from .protocol import _fmt_scalar, content_key, now_iso, safe_project_id, strip_frontmatter, title_token
+from .protocol import _fmt_scalar, content_key, now_iso, safe_project_id, strip_frontmatter, title_token, unquote
 from .engine import write_atomic
 from .audit import AuditBackend
 from .recall import scan_tier_dirs
@@ -43,10 +43,7 @@ def _fm_get(fm: str, key: str) -> str:
     mm = re.search(rf"(?m)^\s*{key}:\s*(.+)$", fm)
     if not mm:
         return ""
-    val = mm.group(1).strip()
-    if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
-        val = val[1:-1]
-    return val
+    return unquote(mm.group(1).strip())
 
 
 def _parse_note(md: Path) -> dict:

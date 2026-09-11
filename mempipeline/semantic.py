@@ -105,7 +105,6 @@ class SemanticIndex:
             tiers = TIER_DIR.values()
         embed_fn = embed_fn or embed
         if embed_fn is embed:
-            self._conn.execute("SELECT path FROM emb")
             known = {r[0] for r in self._conn.execute("SELECT path FROM emb")}
         else:
             known = set()
@@ -120,8 +119,8 @@ class SemanticIndex:
                     except Exception:
                         continue
                     rel = str(md)  # 与 recall._recall 主键一致，RRF 融合不再分叉
-                    proj = md.relative_to(mem_root).parts[1] \
-                        if "projects" in md.relative_to(mem_root).parts else ""
+                    rel_parts = md.relative_to(mem_root).parts
+                    proj = rel_parts[1] if "projects" in rel_parts else ""
                     docs.append((rel, txt, tier, proj))
         if not docs:
             return 0

@@ -146,6 +146,22 @@ for sk, tl in timelines.items():
     print(sk, tl.spans_days(), [sig["flag"] for sig in tl.signals])
 ```
 
+## Timeline signals into governance candidates (P3-③)
+
+`governance.scan_stale_notes(mem_root, ..., timeline=...)` optionally accepts a
+`timeline` built by `build_timeline`; the lifecycle signals are then merged
+into the same P1 candidate list (still **no** automatic state change - Act
+stays human-triggered):
+
+- `conclusion_drift` (previous summary bigram similarity below `drift_threshold`)
+  surfaces as a `re-review` candidate;
+- `revived` (resumed after a gap >= `gap_days`) surfaces as a `review`
+  candidate, with a concurrent conclusion drift folded in as detail.
+
+Last mile: the caller builds the timeline and passes it in, so candidates are
+deduped by path against the stale-archive base list. No new metric system is
+introduced - only the time-dimension signals already validated in P2.
+
 ---
 
 ## 中文使用说明

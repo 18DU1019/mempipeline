@@ -192,7 +192,8 @@ def _read_fm_value(fm: str, key: str) -> str | None:
 
 def scan_stale_notes(mem_root: Path, tiers: Iterable[str] | None = None,
                      projects: Iterable[str] | None = None,
-                     threshold: float = ARCHIVE_THRESHOLD) -> list[dict]:
+                     threshold: float = ARCHIVE_THRESHOLD,
+                     timeline: dict | None = None) -> list[dict]:
     """P1 质量扫描：自动标记旧/冷/冗余候选，只出清单、不自动改状态。
 
     遍历各 tier 笔记，按 stale_days 与 score_note 算（旧度、评分），把 score
@@ -200,7 +201,13 @@ def scan_stale_notes(mem_root: Path, tiers: Iterable[str] | None = None,
     候选。返回结构化清单；**不执行任何 transition**——人工只在最终裁决点
     （晋升/归档）出现一次，其余全部由系统兜底。
 
-    返回字段：{path, status, stale_days, score, suggestion}。
+    P3-③（时间图谱信号使入治理）：可选 `timeline`（`timegrap.build_timeline`
+    输出 {subject: TopicTimeline}）注入后，额外把时间图谱的**结论漂移(drift)**
+    与**断更后复活(revived)** 信号并入同一候选清单——仍不自动改状态。信号
+    复用 timegrap（经 P3-1 实测），不新增第二套度量。
+
+    返回字段（旧/冷候选）：{path, status, stale_days, score, suggestion}；
+    信号候选额外含 {subject, signal, signal_detail}。
     """
     from .protocol import TIER_DIR
     from .recall import scan_tier_dirs
@@ -233,7 +240,64 @@ def scan_stale_notes(mem_root: Path, tiers: Iterable[str] | None = None,
                         "score": round(score, 3),
                         "suggestion": "archive",
                     })
+    if timeline:
+        out = _merge_signal_candidates(out,
+                                       _timeline_signal_candidates(timeline))
     return out
+
+
+def _timeline_signal_candidates(timeline: dict) -> list[dict]:
+    """把 timegrap 时间图谱的断更/结论漂移信号转成候选条目（只读，不改状态）。
+
+    - relation == "drift"：相邻两稿摘要相似度低于阈值 → 结论漂移 → re-review
+    - flag == "revived"：断更 gap 后再次投稿 → 复活 → review（结论需再校验）
+    """
+    out: list[dict] = []
+    for subject, tl in (timeline or {}).items():
+        for sig in getattr(tl, "signals", []) or []:
+            path = sig.get("path")
+            if not path:
+                continue
+            node = next((n for n in tl.nodes if n.path == path), None)
+            imp = node.importance if node else 0.6
+            days = 0
+            if node and node.when is not None:
+                days = max(0, (datetime.now() - node.when).days)
+            # 同一节点可同时带时序信号(flag)与内容关系(relation)。时序的断更复活
+            # 是更稀有的治理事件，优先归为此类；若同时结论漂移，把 drift 作为补充细节。
+            if sig.get("flag") == "revived":
+                detail = f"断更后复活：距上一稿 gap {sig.get('gap_days', '?')} 天"
+                if sig.get("relation") == "drift":
+                    detail += (f"；且结论漂移（相似度 {sig.get('sim_prev', '?')} "
+                               f"< 阈值 {sig.get('drift_threshold', '?')}）")
+                out.append({
+                    "path": path, "subject": subject,
+                    "status": node.status if node else "active",
+                    "stale_days": days,
+                    "score": round(score_note(importance=imp, days_since_active=days), 3),
+                    "suggestion": "review",
+                    "signal": "revived",
+                    "signal_detail": detail,
+                })
+            elif sig.get("relation") == "drift":
+                out.append({
+                    "path": path, "subject": subject,
+                    "status": node.status if node else "active",
+                    "stale_days": days,
+                    "score": round(score_note(importance=imp, days_since_active=days), 3),
+                    "suggestion": "re-review",
+                    "signal": "conclusion_drift",
+                    "signal_detail": (f"结论漂移：与上一稿摘要相似度 "
+                                      f"{sig.get('sim_prev', '?')} < 阈值 "
+                                      f"{sig.get('drift_threshold', '?')}"),
+                })
+    return out
+
+
+def _merge_signal_candidates(base: list[dict], signals: list[dict]) -> list[dict]:
+    """把时间图谱信号候选并入基础候选清单：按路径去重，已上浮的不重复推送。"""
+    known = {c["path"] for c in base}
+    return base + [s for s in signals if s["path"] not in known]
 
 
 def _roz_importance(fm: str) -> float:

@@ -181,6 +181,52 @@ def main() -> bool:
         check(all({"path", "status", "stale_days", "score", "suggestion"} <= set(c) for c in cand),
               "P1: 每项候选含完整结构化字段")
 
+    # ---- 8. P3-③ 时间图谱信号使入治理：drift/revived 并入候选清单、不改状态 ----
+    print("== P3 时间图谱信号使入治理 ==")
+    from mempipeline.timegrap import build_timeline  # noqa: E402
+    with tempfile.TemporaryDirectory() as td4:
+        tmp4 = Path(td4)
+        mem4 = tmp4 / "mem"
+        (mem4 / TIER_DIR["long"]).mkdir(parents=True)
+        aud4 = FileAudit(tmp4 / "audit" / "log.md", tmp4 / "audit" / "manifest.json", mem4)
+        now = datetime.now()
+
+        def _w(filename, title, summary, project_id, days_ago):
+            n = Note(title=title, summary=summary, tier="long", importance=0.9,
+                     body="正文。", status="active", project_id=project_id,
+                     updated=(now - timedelta(days=days_ago)).strftime("%Y-%m-%d %H:%M:%S"))
+            p = mem4 / TIER_DIR["long"] / filename
+            write_atomic(p, n.to_frontmatter() + "\n\n" + n.body + "\n", aud4)
+            return p
+
+        # 话题 A（project_id=cc33cc01）：同层两稿、摘要不同 → 结论漂移(re-review)
+        drift_a = _w("决策A-drift.md", "决策A", "方案甲裁定执行", "cc33cc01", 2)
+        drift_b = _w("决策B-drift.md", "决策B", "重构实施模块乙替代", "cc33cc01", 1)
+        # 话题 B（project_id=dd44ee55）：两稿间隔 35 天(>gap_days=30) → 断更后复活(review)
+        rev_p = _w("约束C-rev.md", "约束C", "约束初稿确立", "dd44ee55", 40)
+        rev_v = _w("约束D-rev.md", "约束D", "约束修订到期", "dd44ee55", 5)
+
+        tl = build_timeline(mem4, gap_days=30, drift_threshold=0.98)
+        cand = scan_stale_notes(mem4, threshold=0.2, timeline=tl)
+
+        drift = [c for c in cand if c.get("signal") == "conclusion_drift"]
+        revived = [c for c in cand if c.get("signal") == "revived"]
+        check(len(drift) == 1 and drift[0]["path"] == str(drift_b)
+              and drift[0]["suggestion"] == "re-review",
+              f"P3: 结论漂移进入候选清单（re-review，{len(drift)}条）")
+        check(len(revived) == 1 and revived[0]["path"] == str(rev_v)
+              and revived[0]["suggestion"] == "review",
+              f"P3: 断更后复活进入候选清单（review，{len(revived)}条）")
+        check(all({"path", "status", "stale_days", "score", "suggestion", "signal",
+                   "subject"} <= set(c) for c in drift + revived),
+              "P3: 信号候选含完整结构化字段")
+        # 不自动改状态：扫描后所有文件 status 仍为 active（未真触发 transition）
+        still_active = all(
+            ("status: \"active\"" in p.read_text(encoding="utf-8")
+             or "status: active" in p.read_text(encoding="utf-8"))
+            for p in (drift_a, drift_b, rev_p, rev_v))
+        check(still_active, "P3: 只出清单、未自动改状态（4 篇仍为 active）")
+
     print("\nGOVERNANCE (E3'):", "ALL PASS" if ok else "SOME FAILED")
     return ok
 

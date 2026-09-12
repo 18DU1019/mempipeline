@@ -216,6 +216,14 @@ class TopicTimeline:
             return 0
         return max(0, (times[-1] - times[0]).days)
 
+    def valid_windows(self) -> list[dict]:
+        """各稿内容的生效窗口（B4）：[(path, valid_from, valid_to)]，末稿 valid_to=None。
+
+        从已推导信号中提取 valid_from/valid_to，按 idx 升序；未推导时为 [](空)。
+        """
+        return [{"path": s["path"], "valid_from": s.get("valid_from"),
+                 "valid_to": s.get("valid_to")} for s in self.signals]
+
 
 # --- 时间解析 ---
 _TIME_FMTS = ("%Y-%m-%d %H:%M:%S%z", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
@@ -394,6 +402,12 @@ class TimelineGraph:
         tl.signals = []
         for i, n in enumerate(nodes):
             rec: dict = {"idx": i, "path": n.path, "time_src": n.time_src}
+            # B4 时序边 valid-from/to：本条内容「谁时生效、何时被下一稿取代」。
+            # valid_from=本稿时间；valid_to=下一稿时间（末稿 None=仍现行），
+            # 对齐 Graphiti「belief 何时生效 / 何时被 supersede」。
+            nxt = nodes[i + 1] if i + 1 < len(nodes) else None
+            rec["valid_from"] = n.when.isoformat() if n.when else None
+            rec["valid_to"] = nxt.when.isoformat() if (nxt and nxt.when) else None
             if n.when is None:
                 rec["flag"] = "untimed"          # 无时间戳（极小概率）
                 tl.signals.append(rec)

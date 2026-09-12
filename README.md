@@ -9,11 +9,11 @@ backend, and a staging ingest gate — with zero private paths baked in.
 
 `mempipeline` sits on the **writer side** of a layered Markdown memory
 mirror. Read-side capabilities live in this same repo — ngram TF-IDF recall
-(`recall.py`), semantic hybrid retrieval (`semantic.py`), timeline graph
-(`timegrap.py`), bidirectional cross-referencing (`crossref.py`), and the
-PDCA Check signal layer (`recall_golden.py`). External distillation /
-control scripts live under the runtime scripts dir (distill / sediment /
-audit_core).
+(`recall.py`, with an optional SQLite inverted-index fast path), semantic
+hybrid retrieval (`semantic.py`), timeline graph (`timegrap.py`),
+bidirectional cross-referencing (`crossref.py`), and the PDCA Check signal
+layer (`recall_golden.py`). External distillation / control scripts live
+under the runtime scripts dir (distill / sediment / audit_core).
 
 ## Model
 
@@ -82,6 +82,34 @@ ingest(
   `AuditBackend` interface.
 - **Data-decoupled** — `protocol` owns the frontmatter contract; every path
   is injected. Nothing here knows your vault.
+
+## SQLite inverted-index fast path (P1-A2)
+
+`recall.MemoryRecall` does a full-disk read + full IDF recompute on every
+query. For large mirrors that is O(N) per query. `recall.TFIDFIndex` is a
+zero-embedding SQLite inverted index that moves that cost to an explicit
+`build()`:
+
+```python
+from pathlib import Path
+from mempipeline.recall import MemoryRecall, TFIDFIndex
+
+idx = TFIDFIndex(Path("./recall.db"))
+idx.build(mem_root)                 # one-time scan; idempotent (skips indexed docs)
+m = MemoryRecall(mem_root, index=idx)   # fast path used when no synonyms normalization
+```
+
+- `recall()` returns the same `(path, score)` shape as `MemoryRecall`, so the
+  index is a drop-in fast path, not a second retrieval strategy. On any query
+  error it falls back to the full scan.
+- When `synonyms` normalization is active, the query/scan path is used so the
+  normalized space stays consistent with `MemoryRecall`.
+- `governance.governance_health()` is a separate read-only snapshot (status
+  distribution, candidate backlog & oldest-stale age) for rendering the
+  governance-review pane.
+
+`mempipeline-panel` exposes the optional `--tfidf-db` flag to feed the index
+into the served recall path.
 
 ## Time-dimension graph (P2)
 
@@ -159,7 +187,7 @@ for sk, tl in timelines.items():
    ingest(staging, mem, {"long": "01-长期记忆", "medium": "02-中期记忆"},
           audit, on_ingest=lambda o: print("git add --", o))
    ```
-4. **读者**：用本仓库 `recall.MemoryRecall`（ngram TF-IDF + 同义归一）或 `semantic.hybrid_recall`（bge-m3 + RRF 融合）做召回；时间演化用 `timegrap.build_timeline`（P2）；交叉引用用 `crossref.find_related`。
+4. **读者**：用本仓库 `recall.MemoryRecall`（ngram TF-IDF + 同义归一）或 `semantic.hybrid_recall`（bge-m3 + RRF 融合）做召回；时间演化用 `timegrap.build_timeline`（P2）；交叉引用用 `crossref.find_related`。大镜像可先用 `recall.TFIDFIndex.build()` 建 SQLite 倒排，再注入 `MemoryRecall(index=...)` 走快路径（同义词归一时直线回落全扫，口径一致）。
 
 ### DQ 转义契约（2026-08-27 起生效）
 

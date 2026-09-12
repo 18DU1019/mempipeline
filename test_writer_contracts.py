@@ -88,6 +88,34 @@ def main() -> bool:
     v = check_contract("纯正文，无 frontmatter 块\n", stem="项目约束-z")
     check(v == ["frontmatter 缺失"], f"无 frontmatter 报缺（{v}）")
 
+    # ---- 1b. _DEFAULT 兜底不可变（set 共享引用防污染回归） ----
+    print("== _DEFAULT 不可变 ==")
+    from mempipeline import writer_contracts as wc
+    base_default = wc._DEFAULT
+    check(isinstance(base_default["allowed_tiers"], frozenset),
+          f"_DEFAULT.allowed_tiers 为 frozenset（{type(base_default['allowed_tiers']).__name__}）")
+    # 读侧拿到的兜底契约与 _DEFAULT 非同一 dict（浅拷贝隔离）
+    alien2 = _fm("another_future_writer", "medium", "项目会话-w")
+    contract = wc.WRITER_CONTRACTS.get("another_future_writer", dict(base_default))
+    check(contract is not base_default, "兜底契约是浅拷贝新 dict（非共享同一对象）")
+    check(contract["allowed_tiers"] is base_default["allowed_tiers"],
+          "frozenset 值可安全共享（不可变，无变异风险）")
+
+    # ---- 1c. robot-vision 契约（双写者） ----
+    print("== robot-vision 契约 ==")
+    # 机器人观测：中期 + 项目族带 project_id → 合规
+    v = check_contract(_fm("robot-vision", "medium", "项目会话-r1", "robot-客厅"), stem="项目会话-r1")
+    check(v == [], f"robot-vision 中期+项目族带 project_id 合规（{v}）")
+    # 机器人越层写 long → 违规
+    v = check_contract(_fm("robot-vision", "long", "项目会话-r2", "robot-客厅"), stem="项目会话-r2")
+    check(any("memory_tier" in x for x in v), f"robot-vision 越层写 long 报违规（{v}）")
+    # 机器人缺 project_id → 违规（观测稿必须归属项目族）
+    v = check_contract(_fm("robot-vision", "medium", "项目会话-r3"), stem="项目会话-r3")
+    check(any("缺 project_id" in x for x in v), f"robot-vision 缺 project_id 报违规（{v}）")
+    # robot-vision 可治理 → 不在 non_governable 集合
+    check("robot-vision" not in non_governable_writers(),
+          "robot-vision 可治理（不进 non_governable）")
+
     # ---- 2. non_governable_writers ----
     print("== non_governable_writers ==")
     ng = non_governable_writers()

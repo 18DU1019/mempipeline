@@ -34,9 +34,20 @@ WRITER_CONTRACTS: dict[str, dict[str, Any]] = {
         "project_scope": "optional",  # project_id 源带则透传，不带不强行
         "governable": False,
     },
+    # robot-vision：具身机器人观测投稿。感知稿天然短时效 → 只写中期；语义归属 → 强制
+    # 项目族 project_id；可治理 → 允许被 supersede/archive 建议覆盖（观测可证伪）。
+    # 跨写者冲突裁决规则见 ROADMAP P3.6 后续段（关键：观测数≠独立证据数，需 source_modal
+    # 区分模态/时间窗；信任=min(写者基线,观测置信)——此条目静态基线，动态聚合在 runbook）。
+    "robot-vision": {
+        "allowed_tiers": {"medium"},      # 观测稿短时效，不染指长期层
+        "project_scope": "family",        # 必须带 project_id（语义归属，独立证据聚合不自生效）
+        "governable": True,               # 可被建议覆盖，最终执行仍在人类
+    },
 }
 
-_DEFAULT = {"allowed_tiers": set(), "project_scope": "optional", "governable": False}
+# 兜底契约：allowed_tiers 用 frozenset 不可变，杜绝读侧误改污染（dict(_DEFAULT) 浅拷贝
+# 只隔离外层 dict，set 值若不冻结则仍是共享可变引用；契约表只读，冻结即正确形态）。
+_DEFAULT = {"allowed_tiers": frozenset(), "project_scope": "optional", "governable": False}
 
 # frontmatter 块与字段读取（与 governance._FM_RE / timegrap 同构）
 _FM_RE = re.compile(r"(?m)^---\s*\n(.*?)\n---\s*\n?", re.S)

@@ -143,5 +143,25 @@
 
 **推荐下一候选**：无——E 段三件已闭环，写者约束数据化 + 可转移 + 可观测齐备，与回收长线（C1/MaRS/MindMemOS）均不推进。进入观测期，周检随 D2+E3 探针累积样本。
 
+### P3.11 双写者约束扩展（具身机器人接入方向，2026-09-13 联网复核后落地）
+
+**缘起**：承接"接入具身机器人"规划——机器人作为一等写者接入文本记忆域（域判据：文本摘要同域直连，空间几何域隔离另立）。联网复核获证（CAMA 虚假多数 / MemoryAgentBench 确定性裁决 / Nous min(provenance,content) / MemClaw 矛盾吞写 / MemEX 分歧保留）。
+
+**落地（纯增量可逆，注册表驱动）**：
+- `[x]` **F1 机器人写者条目**：`WRITER_CONTRACTS` 新增 `robot-vision`（`allowed_tiers={"medium"}` 观测稿短时效不染指长期层 / `project_scope="family"` 强制归属项目族 / `governable=True` 可被建议覆盖、人类最终执行）。`test_writer_contracts.py` 新增 1c 段 4 用例（合规/越层/缺 project_id/可治理）。
+- `[x]` **F2 兜底不可变**：`_DEFAULT.allowed_tiers` 冻结为 `frozenset`（`dict(_DEFAULT)` 浅拷贝只隔离外层 dict，set 值不冻结则仍是共享可变引用），补 3 回归用例。
+- `[x]` **F3 修正 4 顺序警示（ROADMAP 铁律级）**：矛盾检测（timegrap drift/superseded）必须发生在去重/写入门**之前或并行**，防近重复门吞掉矛盾写入后永远观测不到（MemClaw 实测：同步 near-duplicate gate 可在异步 contradiction detector 前拒掉矛盾写入）。
+
+**Runbook：跨写者冲突裁决**（规则进 runbook，不写死成代码——当前无真值数据可验）
+1. 检测：timegrap `drift` 信号，同 `project_id` 族内、同实体、相邻两稿结论互斥。
+2. 裁决"谁新"：**确定性**时间/时序比较（max(serial) 或 valid_from），**绝不让 LLM 判新旧**（MemoryAgentBench：确定性选择器 +10.8 分，67.2→78.0）。
+3. 裁决"谁可信"：`信任 = min(写者基线, 观测置信)`；写者基线 = `WRITER_CONTRACTS` 静态条目（robot-vision 与 distill 同层），观测置信来自 `confidence_*` 字段——**防内容侧投毒游戏化**（Nous 实测：自信措辞投毒可得 0.96 信任）。
+4. 观测数≠独立证据数：升级候选需**跨模态/跨时间窗独立观测**（`source_modal` 字段兼作独立证据判定），连续同通道读数只算 1 个证据源（CAMA：相关证据重复计数会成虚假多数）。
+5. 结果：分歧**双稿保留 + CONTRADICTS 标注**，只出候选、人类最终 Check→Act（MemEX：分歧本身是信号；Kumiho/AGM：不可变 revision + 改动最小化，不因一个实体连坐整个项目族）。
+
+**验收**：`test_writer_contracts.py` 17/17 全绿；六套件回归绿（test_writer_contracts 并入周检 TESTS 由 D2 链路自动跑）。
+
+**推荐下一候选**：进入观测期。跨写者冲突裁决规则待有真实机器人投稿数据后验证再定稿（当前规则为 runbook 级，不写死成代码）；空间锚定检索层（B 域）为独立立项，不在文本记忆域范围内。
+
 ---
 生成：ROADMAP v0.2（2026-09-12 联网复核并规划 D 段）。拟议阶段非既定计划。

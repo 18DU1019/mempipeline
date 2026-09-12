@@ -60,5 +60,35 @@
 - 已闭环：P1（自动化审计）、P2（时间维度图谱）、P3（自我进化闭环 3/3：③ 时间图谱信号使入治理 fab1feb / ① golden 全层级回归基线 086086a / ② Act 人类触发建议面 18121cd）。
 - 待办：验证信号（候选清单误报率 / 跨轮次脉络连续性）待跨轮次运行积累样本后定稿；无其他 TODO 挂点。
 
+### P3.5 纯增量加固（2026-09-12，A+B 段全做）
+
+| 编号 | 内容 | commit |
+|------|------|--------|
+| c0 | audit 桥/面板各自 `_NullAudit` 合并为 `audit.NullAudit` 单一实现 | `47b961c` |
+| A1 | RRF 语义缓存：`qemb` 查询嵌入 + `qres` top-k，按索引 gen 失效 | `e25fa99` |
+| A2 | Act 候选去留效用诊断 `advise_retention`（重要×时新×脉络活跃度，Advisory 只读） | `04e3eba` |
+| A3 | TFIDF doc 表内容键 `ckey`(SHA-256) UNIQUE 去重（ASI06 防重复/污染） | `ffbce4b` |
+| B4 | timegrap 时序边 `valid_from/valid_to` 编码内容生效/被取代窗口 | `b00a0a4` |
+| B5 | panel 纯逻辑层拆 `panel_ops`，主模块 602 行瘦身 | `6718a70` |
+
+七套测试全绿（act/bridge/governance/mempipeline/panel/semantic/timegrap）后 push master 至 `6718a70`。
+
+### ∮ 下一阶段候选演进（对照 2025–26 前沿，拟议待裁决）
+
+来源（一手为主，标注）：A-MEM/Zettelkasten 双向回溯链接（NeurIPS'25 arXiv:2502.12110）；Episodic Memory（arXiv:2502.06975）；Mem0（arXiv:2504.19413）；RMM 反思式记忆管理 Prospective/Retrospective（ACL'25 2025.acl-long.413）；Memora 过时复用惩罚指标 FAMA + Forgetting 评测（arXiv:2604.20006）；MaRS 六遗忘策略与 (ε,δ)-DP（arXiv:2512.12856）；Stability/Safety Governed Memory 时序衰减 Weibull 与治理（arXiv:2603.11768）；SYNAPSE 三重混合检索+时间衰减（arXiv:2601.02744）。以上为 2025-12 至 2026-05 一手论文；检索效率/健康类（Mem0）为业界工程二手，标注推测属性。
+
+**写作/检索侧候选（低风险纯增量，复用现有架构，golden 护栏兜底）**
+- **C2 时间/脉络信号进 RRF 排序**：融合加时新度加权（复用 valid_from/to 时效窗）+ 项目脉络共识度，对齐 SYNAPSE 时间衰减。风险：可能拉低 recall，需 golden 回归红线。
+- **C3 过时记忆复用检测（FAMA 式）**：把"复用 valid_to 已覆盖的旧稿"计为惩罚项接入 golden 回归，产出时序新鲜度指标；复用现有 timegrap valid_from/to + 观测样本盘。纯观测零状态。
+- **C4 引用信号增强 Act 建议面**：把周检 golden 未命中 + 信号样本盘累积证据喂给 act 诊断（Retrospective 方向），仍只建议、**不自动改参**（遵守 Act 默认关铁律）。
+
+**架构侧候选（需裁决打破当前约束，暂不推荐本轮）**
+- C1 Agentic 双向链接（写侧入库检索历史并回写）：收益联想召回，代价是写路径引入 agentic 循环，**违背「LLM 任务 stateless business call、无执行循环」硬约束**。
+- C6 事件级 EDU 记忆表示（EMem）：大变构，冲击现有 project token 主题键，高风险。
+- C5 隐私/敏感分级 + 动态访问控制（MaRS DP / SSGM）：单用户本地优先场景价值有限。
+- C7 遗忘策略形式化（MaRS 六策略）：可视化为策略选择，可与 C2/C3 合并。
+
+**推荐组合（下一轮裁决范围）**：C2 + C3（检索时效 + 过时复用检测，纯增量）；C4 作为 Act 建议面增强；C1/C5/C6 归档长线。
+
 ---
 生成：ROADMAP v0.1；2026-09-01。拟议阶段非既定计划。

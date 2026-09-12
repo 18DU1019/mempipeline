@@ -227,6 +227,40 @@ def main() -> bool:
             for p in (drift_a, drift_b, rev_p, rev_v))
         check(still_active, "P3: 只出清单、未自动改状态（4 篇仍为 active）")
 
+    # ---- 8b. D3 软失效状态显式化：valid_to 已取代的过时旧稿 → superseded 候选 ----
+    print("== D3 软失效状态显式化 ==")
+    with tempfile.TemporaryDirectory() as td5:
+        tmp5 = Path(td5)
+        mem5 = tmp5 / "mem"
+        (mem5 / TIER_DIR["long"]).mkdir(parents=True)
+        aud5 = FileAudit(tmp5 / "audit" / "log.md", tmp5 / "audit" / "manifest.json", mem5)
+        now = datetime.now()
+
+        def _w5(filename, title, summary, project_id, days_ago):
+            n = Note(title=title, summary=summary, tier="long", importance=0.9,
+                     body="正文。", status="active", project_id=project_id,
+                     updated=(now - timedelta(days=days_ago)).strftime("%Y-%m-%d %H:%M:%S"))
+            p = mem5 / TIER_DIR["long"] / filename
+            write_atomic(p, n.to_frontmatter() + "\n\n" + n.body + "\n", aud5)
+            return p
+
+        # 话题 X：旧稿 + 新稿（同主题同 project，旧稿被后续稿取代）
+        old_x = _w5("结论X-旧.md", "结论X", "旧方案定版", "ee55ff66", 30)
+        new_x = _w5("结论X-新.md", "结论X", "新方案替换旧版", "ee55ff66", 1)
+        tl5 = build_timeline(mem5, gap_days=90, drift_threshold=0.5)
+        cand5 = scan_stale_notes(mem5, threshold=0.2, timeline=tl5)
+        superseded = [c for c in cand5 if c.get("signal") == "superseded"]
+        check(str(old_x) in {c["path"] for c in superseded},
+              "D3: 被后续稿取代的旧稿进入 superseded 候选")
+        check(not any(c["path"] == str(new_x) and c.get("signal") == "superseded"
+                      for c in superseded),
+              "D3: 最新有效稿不被标 superseded")
+        check(superseded and superseded[0]["suggestion"] == "supersede",
+              "D3: superseded 候选带 supersede 建议")
+        check(("status: \"active\"" in old_x.read_text(encoding="utf-8")
+               or "status: active" in old_x.read_text(encoding="utf-8")),
+              "D3: 只出候选、未改写文件状态")
+
     print("\nGOVERNANCE (E3'):", "ALL PASS" if ok else "SOME FAILED")
     return ok
 

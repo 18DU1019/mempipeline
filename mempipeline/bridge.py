@@ -30,7 +30,7 @@ from typing import Callable, Iterable
 
 from .protocol import _fmt_scalar, content_key, now_iso, safe_project_id, strip_frontmatter, title_token, unquote
 from .engine import write_atomic
-from .audit import AuditBackend
+from .audit import AuditBackend, NullAudit
 from .recall import scan_tier_dirs
 from .governance import vault_status
 
@@ -128,17 +128,10 @@ def export_promoted(mem_root: Path, vault_root: Path,
                 if out.exists():
                     stats["skipped"] += 1
                     continue
-                st, _ = write_atomic(out, text, audit or _NullAudit(),
+                st, _ = write_atomic(out, text, audit or NullAudit(),
                                      source="bridge:export")
                 stats["exported" if st == "wrote" else "skipped"] += 1
     return stats
-
-
-class _NullAudit(AuditBackend):
-    """audit 未注入时的静默后端（导出为副本资产，审计可选）。"""
-
-    def mark(self, path, kind, source="manual", change=None):
-        return {"path": str(path), "kind": kind, "source": source}
 
 
 def main(argv=None) -> int:

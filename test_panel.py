@@ -213,7 +213,7 @@ def test_null_audit_transition() -> bool:
         if not cond:
             ok = False
 
-    from mempipeline.panel import _NullAudit
+    from mempipeline.audit import NullAudit
     from mempipeline.governance import transition
     from mempipeline.protocol import Note
 
@@ -229,7 +229,7 @@ def test_null_audit_transition() -> bool:
         write_atomic(out, n.to_frontmatter() + "\n\n" + n.body + "\n", audit)
 
         try:
-            st, frm = transition(out, "promoted", _NullAudit(), source="panel")
+            st, frm = transition(out, "promoted", NullAudit(), source="panel")
             check(st in ("wrote", "skipped") and frm == "candidate",
                   f"无审计后端晋升不崩溃（{st}/{frm}）")
         except AttributeError:

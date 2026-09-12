@@ -27,6 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Iterable
 
+from .audit import NullAudit
 from .governance import review_queue, transition
 from .recall import MemoryRecall
 
@@ -163,7 +164,7 @@ def _submit_note(title: str, body: str, tier: str, project: str,
             f"source_staging: {_fmt_scalar('workbuddy-panel')}\n"
             f"status: {_fmt_scalar('candidate')}\n"
             f"updated: {_fmt_scalar(now_iso())}\n---\n\n{body.strip()}\n")
-    st, _ = write_atomic(out, text, _NullAudit(), source="panel-submit")
+    st, _ = write_atomic(out, text, NullAudit(), source="panel-submit")
     return {"ok": st in ("wrote", "skipped"), "status": st,
             "path": str(out)}
 
@@ -582,7 +583,7 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             _json(self, {"error": "path outside mem_root"}, 400)
             return
-        st, frm = transition(path, to, self.audit or _NullAudit(), source="panel")
+        st, frm = transition(path, to, self.audit or NullAudit(), source="panel")
         ok = st in ("wrote", "skipped") and frm == "candidate"
         _json(self, {"ok": ok, "status": st, "from": frm})
 
@@ -591,16 +592,6 @@ class _Handler(BaseHTTPRequestHandler):
                          data.get("tier", "medium"),
                          data.get("project", ""), STAGING_ROOT)
         _json(self, r, 200 if r.get("ok") else 400)
-
-
-class _NullAudit:
-    """无审计后端时的静默实现（写/跳与状态轨迹均不落库）。"""
-
-    def mark(self, path, kind, source="manual", change=None):
-        return {}
-
-    def trace(self, path, from_state, to_state, reason, source="governance"):
-        return {}
 
 
 def serve(mem_root: Path, audit_log: Path | None = None,

@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from mempipeline.semantic import SemanticIndex, hybrid_recall, rrf_fuse  # noqa: E402
+from mempipeline.semantic import SemanticIndex, hybrid_recall, rrf_fuse
 
 
 def main() -> bool:
@@ -58,7 +58,6 @@ def main() -> bool:
         # ---- 1. 同义改写命中（语义核心价值）----
         print("== 语义召回 ==")
         q1 = "定期往市场投入钱买基金"
-        vec = idx.recall  # 占位防误用
         sem_dora = None
         # 直接语义召回（项目 A）
         from mempipeline.semantic import embed
@@ -86,7 +85,7 @@ def main() -> bool:
         tf_hit = bool(tf)
         check(tf_hit or not tf_hit, f"TF-IDF 单独命中情况记录（{len(tf)} 条）")
         if tf_hit:
-            print(f"    注：TF-IDF 也命中了（字符重叠），语义层作为第二通道")
+            print("    注：TF-IDF 也命中了（字符重叠），语义层作为第二通道")
 
         # ---- 4. 语义不可用时回落 ----
         h_fallback = hybrid_recall(q1, k=3, mem_root=mem_root, index=None,

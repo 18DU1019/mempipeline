@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from mempipeline.timegrap import (  # noqa: E402
+from mempipeline.timegrap import (
     subject_key, summary_similarity, build_timeline, TimelineGraph,
     GAP_DAYS, DRIFT_THRESHOLD, DUP_THRESHOLD,
 )

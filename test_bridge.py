@@ -14,11 +14,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from mempipeline.bridge import export_promoted, vault_frontmatter  # noqa: E402
-from mempipeline.protocol import Note, TIER_DIR  # noqa: E402
-from mempipeline.engine import write_atomic  # noqa: E402
-from mempipeline.audit import FileAudit  # noqa: E402
-from mempipeline.ingest import _parse_fm  # noqa: E402
+from mempipeline.bridge import export_promoted, vault_frontmatter
+from mempipeline.protocol import Note, TIER_DIR
+from mempipeline.engine import write_atomic
+from mempipeline.audit import FileAudit
+from mempipeline.ingest import _parse_fm
 
 
 def main() -> bool:

@@ -16,13 +16,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from mempipeline.audit import FileAudit  # noqa: E402
-from mempipeline.governance import (  # noqa: E402
+from mempipeline.audit import FileAudit
+from mempipeline.governance import (
     filter_note, score_note, stale_days, transition, review_queue, vault_status,
     scan_stale_notes, governance_health, VALID_TRANSITIONS,
 )
-from mempipeline.protocol import Note, TIER_DIR  # noqa: E402
-from mempipeline.engine import write_atomic  # noqa: E402
+from mempipeline.protocol import Note, TIER_DIR
+from mempipeline.engine import write_atomic
 
 
 def main() -> bool:
@@ -183,7 +183,7 @@ def main() -> bool:
 
     # ---- 8. P3-③ 时间图谱信号使入治理：drift/revived 并入候选清单、不改状态 ----
     print("== P3 时间图谱信号使入治理 ==")
-    from mempipeline.timegrap import build_timeline  # noqa: E402
+    from mempipeline.timegrap import build_timeline
     with tempfile.TemporaryDirectory() as td4:
         tmp4 = Path(td4)
         mem4 = tmp4 / "mem"

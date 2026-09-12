@@ -26,7 +26,7 @@ def main():
     ok &= _check(len(c["absent_terms"]) == 1
                  and c["absent_terms"][0]["term"] == "判重"
                  and c["absent_terms"][0]["lever"] == "synonym",
-                 f"缺词定位为「判重」且归 synonym")
+                 "缺词定位为「判重」且归 synonym")
     ok &= _check("synonym 杠杆" in c["suggestion"], "suggestion 含 synonym 杠杆文案")
 
     # ---- 2. stopword 杠杆：期望笔记缺「全库通用词」→ 归 stopword ----

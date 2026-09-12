@@ -58,7 +58,10 @@ def _fm_blocks(text: str) -> list[str]:
 
 
 def _field_value(fm: str, key: str) -> str:
-    m = re.search(rf"(?m)^{key}:\s*(.+?)\s*$", fm)
+    # 行锚定取值：`(.+)$` 的 `$` 锚定行尾；冒号后空白用 `[ \t]*` 而非 `\s*`，
+    # 因为 `\s` 含换行——`project_id:\s*(.+)$` 会把 `project_id: `(空) 的下一行
+    # `confidence_perception: 0.9` 吞成 project_id 值，导致缺 project_id 判定失效。
+    m = re.search(rf"(?m)^{key}:[ \t]*(.+)$", fm)
     return m.group(1).strip().strip("\"'") if m else ""
 
 

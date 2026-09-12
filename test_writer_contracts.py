@@ -87,6 +87,14 @@ def main() -> bool:
     # 无 frontmatter → 明确报缺
     v = check_contract("纯正文，无 frontmatter 块\n", stem="项目约束-z")
     check(v == ["frontmatter 缺失"], f"无 frontmatter 报缺（{v}）")
+    # 空字段跨行吞噬回归：`project_id: `(空值) 后跟下一行字段，不得把下一行
+    # 吞成 project_id（实测旧 `\s*(.+?)\s*$` 形态会把 confidence_perception 吞入，
+    # 导致缺 project_id 判定失效）
+    empty_pid = _fm("robot-vision", "medium", "项目会话-e1").replace(
+        "status: active", "project_id: \nstatus: active", 1)
+    v = check_contract(empty_pid, stem="项目会话-e1")
+    check(any("缺 project_id" in x for x in v),
+          f"空 project_id 字段不跨行吞噬下一行（{v}）")
 
     # ---- 1b. _DEFAULT 兜底不可变（set 共享引用防污染回归） ----
     print("== _DEFAULT 不可变 ==")

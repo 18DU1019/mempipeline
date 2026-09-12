@@ -18,10 +18,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from mempipeline.audit import FileAudit  # noqa: E402
-from mempipeline.panel import serve  # noqa: E402
-from mempipeline.protocol import Note, TIER_DIR  # noqa: E402
-from mempipeline.engine import write_atomic  # noqa: E402
+from mempipeline.audit import FileAudit
+from mempipeline.protocol import Note, TIER_DIR
+from mempipeline.engine import write_atomic
 
 
 def main() -> bool:

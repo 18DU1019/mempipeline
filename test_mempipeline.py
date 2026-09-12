@@ -326,7 +326,7 @@ def test_project_isolation() -> bool:
         (staging / "proj_a" / "legacy.md").write_text(
             "---\ntitle: 旧式笔记\nsummary: 无项目\nmemory_tier: medium\n---\n旧式内容。",
             encoding="utf-8")
-        st2 = ingest(staging, mem_root, None, audit, require_project=False)
+        ingest(staging, mem_root, None, audit, require_project=False)
         check(any("旧式" in f.name for f in (mem_root / "02-中期记忆").glob("*.md")),
               "无 project_id 回落 legacy 顶层目录")
     print("\nPROJECT ISOLATION (E1):", "ALL PASS" if ok else "SOME FAILED")

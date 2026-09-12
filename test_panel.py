@@ -107,6 +107,34 @@ def main() -> bool:
         au = get("/api/audit?n=10")
         check(len(au) >= 2, f"审计日志 tail（{len(au)} 行）")
 
+        # 6. TF-IDF 索引注入路径（P1-A2）：注入 TFIDFIndex 后 search 落索引不报错
+        from mempipeline.recall import TFIDFIndex
+        tindex = TFIDFIndex(tmp / "tfidf_test.db")
+        try:
+            tindex.build(mem_root)  # 索引含"单笔风险"笔记
+            _Handler.tfidf_index = tindex
+            sr_idx = get("/api/search?q=" + urllib.request.quote("单笔风险") + "&k=3")
+            check(len(sr_idx) >= 1 and sr_idx[0]["path"].endswith("规则-a1.md"),
+                  f"注入索引后检索命中规则（{sr_idx[0]['path'] if sr_idx else 'none'}）")
+        finally:
+            _Handler.tfidf_index = None  # 复位，避免影响它例
+            tindex.close()  # 关闭 SQLite 连接，避免临时目录清理被占用
+
+        # 7. 其余真实端点（首页 / browse / index_status / 404）
+        with urllib.request.urlopen(base + "/", timeout=5) as r:
+            check(r.status == 200 and b"html" in r.read().lower(),
+                  "首页返回 200 HTML")
+        b = get("/api/browse?page=1&limit=10")
+        check(b["total"] >= 2 and len(b["rows"]) >= 2,
+              f"browse 返回笔记（total={b['total']}, rows={len(b['rows'])}）")
+        ista = get("/api/index_status")
+        check(isinstance(ista, dict), "index_status 返回对象")
+        try:
+            urllib.request.urlopen(base + "/no/such/route", timeout=5)
+            check(False, "未知路由应 404")
+        except urllib.error.HTTPError as e:
+            check(e.code == 404, "未知路由返回 404")
+
         srv.shutdown()
         srv.server_close()
 

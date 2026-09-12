@@ -496,6 +496,7 @@ class _Handler(BaseHTTPRequestHandler):
     mem_root: Path = Path(".")
     audit_log: Path | None = None
     semantic_index: object | None = None
+    tfidf_index: object | None = None  # TF-IDF 倒排快路径（MemoryRecall 注入）
     audit: object | None = None  # 真实 AuditBackend（面板晋升写审计）
 
     def log_message(self, *a):  # 静默访问日志
@@ -531,6 +532,10 @@ class _Handler(BaseHTTPRequestHandler):
                 try:
                     res = hybrid_recall(q, k=k, mem_root=self.mem_root,
                                         index=self.semantic_index,
+                                        memory=MemoryRecall(
+                                            self.mem_root,
+                                            projects=[proj] if proj else None,
+                                            index=self.tfidf_index),
                                         projects=[proj] if proj else None)
                 except Exception:
                     res = self._tfidf(q, k, proj)
@@ -547,7 +552,8 @@ class _Handler(BaseHTTPRequestHandler):
             _json(self, {"error": "not found"}, 404)
 
     def _tfidf(self, q: str, k: int, proj: str | None) -> list:
-        m = MemoryRecall(self.mem_root, projects=[proj] if proj else None)
+        m = MemoryRecall(self.mem_root, projects=[proj] if proj else None,
+                         index=self.tfidf_index)
         return [(p, 1.0 / (i + 1)) for i, (p, _) in enumerate(m.recall(q, k))]
 
     def do_POST(self):
@@ -600,11 +606,13 @@ class _NullAudit:
 def serve(mem_root: Path, audit_log: Path | None = None,
           index: object | None = None, port: int = 8790,
           host: str = "127.0.0.1",
-          audit: object | None = None) -> None:
+          audit: object | None = None,
+          tfidf_index: object | None = None) -> None:
     """起面板服务（仅本机）。Ctrl+C 停止。"""
     _Handler.mem_root = mem_root
     _Handler.audit_log = audit_log
     _Handler.semantic_index = index
+    _Handler.tfidf_index = tfidf_index
     _Handler.audit = audit
     srv = ThreadingHTTPServer((host, port), _Handler)
     print(f"mempipeline 面板: http://{host}:{port}/  (mem_root={mem_root})")
@@ -622,11 +630,16 @@ def main(argv=None) -> int:
     p.add_argument("--mem-root", required=True, help="记忆镜像根")
     p.add_argument("--audit-log", default=None, help="审计日志路径（可选）")
     p.add_argument("--index-db", default=None, help="语义索引 SQLite（可选）")
+    p.add_argument("--tfidf-db", default=None, help="TF-IDF 倒排索引 SQLite（可选，P1-A2 快路径）")
     p.add_argument("--port", type=int, default=8790)
     a = p.parse_args(argv)
     idx = None
     if _HAS_SEMANTIC and a.index_db:
         idx = SemanticIndex(Path(a.index_db))
+    tidx = None
+    if a.tfidf_db:
+        from .recall import TFIDFIndex
+        tidx = TFIDFIndex(Path(a.tfidf_db))
     audit = None
     if a.audit_log and a.mem_root:
         from .audit import FileAudit
@@ -634,7 +647,7 @@ def main(argv=None) -> int:
                           Path(a.audit_log).with_suffix(".manifest.json"),
                           Path(a.mem_root))
     serve(Path(a.mem_root), Path(a.audit_log) if a.audit_log else None,
-          idx, port=a.port, audit=audit)
+          idx, port=a.port, audit=audit, tfidf_index=tidx)
     return 0
 
 

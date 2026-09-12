@@ -73,6 +73,22 @@ def main():
                            lambda q, kb: [("other", 1.0)], corpus, k=3)
     ok &= _check(c5c["never_scored"] is True, "trace: 期望笔记未获分 -> never_scored")
 
+    # ---- 6. A2 候选去留效用诊断（只读、Advisory）----
+    print("== A2 候选去留 ==")
+    r = act.advise_retention(importance=0.9, stale_days=10, recurrence_count=2)
+    ok &= _check(r["action"] == "retain" and 0.6 <= r["utility"] <= 1.0,
+                 f"高重要+较新+活脉络 -> retain（utility={r['utility']}）")
+    r2 = act.advise_retention(importance=0.1, stale_days=400, recurrence_count=1)
+    ok &= _check(r2["action"] == "dismiss_candidate",
+                 f"低重要+极旧+孤立 -> dismiss_candidate（utility={r2['utility']}）")
+    r3 = act.advise_retention(importance=0.8, stale_days=200, recurrence_count=1)
+    ok &= _check(r3["action"] == "merge_candidate",
+                 f"高重要但陈旧单稿 -> merge_candidate（utility={r3['utility']}）")
+    ok &= _check(r["advisory"] is True and r["relevance"] > r2["relevance"],
+                 "advisory 恒真，且活脉络 relevance 高于孤立稿")
+    ok &= _check(0.0 <= r["recency"] <= 1.0 and 0.0 <= r["relevance"] <= 1.0,
+                 "recency/relevance 归一 0..1")
+
     print("\nACT (P3-②):", "ALL PASS" if ok else "SOME FAILED")
     return ok
 

@@ -117,3 +117,49 @@ def _render(card: dict) -> str:
                 f"synonym 杠杆：期望笔记缺该专用词「{at['term']}」(mean_df={at['mean_df']})，"
                 f"提示与镜像收录用词 / synonyms 映射不一致")
     return "；".join(parts) if parts else "无明显缺词，需从查询表述或阈值层复核"
+
+
+# 去留效用分档阈值（A2）：效用分 0..1，越高越值得保留
+RETENTION_RETAIN = 0.6
+RETENTION_MERGE = 0.4
+
+
+def advise_retention(importance: float, stale_days: int,
+                     recurrence_count: int = 0, *,
+                     decay_half_life_days: int = 90,
+                     w_importance: float = 0.4, w_recency: float = 0.3,
+                     w_relevance: float = 0.3) -> dict:
+    """候选去留效用诊断（A2）：对陈旧候选给「保留/合并/淘汰」建议分。只显影不落库。
+
+    启发自 Intelligent Decay 的 combine(recency, relevance, utility) 效用模型，
+    但保持 Act 默认关：输出效用分与分档建议，是否执行仍人工裁决（advisory=True）。
+    该效用分可作为「候选误报率」的观测面——日后与人工去留决议比对即可累计误报率。
+
+    输入为显式标量（调用方从 governance 候选 + timegrap 脉络相关度注入，保持解耦）：
+    - importance: 0..1 笔记重要度
+    - stale_days: 距最近更新天数
+    - recurrence_count: 主题脉络跨稿出现次数（计当前稿为 1）；>=2 表示「活脉络」
+      （多次续写），于是 relevance 分量抬高。
+    - decay_half_life_days: 陈旧衰减半衰期（默认 90，与 timegrap 断更阈值一致）。
+    """
+    recency = 0.5 ** (stale_days / max(1, decay_half_life_days))  # 指数衰减 0..1
+    relevance = min(1.0, max(0.0, recurrence_count) / 3.0)  # 活脉络多稿 => 相关度升
+    utility = (w_importance * max(0.0, min(1.0, importance))
+               + w_recency * recency
+               + w_relevance * relevance)
+    if utility >= RETENTION_RETAIN:
+        action, reason = "retain", "效用分高，建议保留并续写/刷新"
+    elif utility >= RETENTION_MERGE:
+        action, reason = "merge_candidate", "效用中等，建议与同主题其他稿合并后再评"
+    else:
+        action, reason = "dismiss_candidate", "效用偏低，建议归档/降权或淘汰"
+    return {
+        "utility": round(utility, 3),
+        "recency": round(recency, 3),
+        "relevance": round(relevance, 3),
+        "components": {"importance": importance, "stale_days": stale_days,
+                       "recurrence_count": recurrence_count},
+        "action": action,
+        "reason": reason,
+        "advisory": True,
+    }

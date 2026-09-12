@@ -19,6 +19,7 @@ from mempipeline.act import summarize_cards
 from mempipeline.recall import MemoryRecall
 from mempipeline.recall_golden import build_stale_map
 from mempipeline.recall_golden import check as golden_check
+from mempipeline.recall_golden import forget_quality
 from mempipeline.semantic import hybrid_recall, time_factor
 
 
@@ -143,6 +144,55 @@ def main() -> bool:
     check(s["advisory"] is True, "advisory 恒真（只建议不落库）")
     check(isinstance(s["suggestion"], str) and "synonym" in s["suggestion"],
           "建议文本含 lever 优先级")
+
+    # ---- D1 time_factor 多策略：linear 晚段更快淘汰旧稿，半衰期处等值 ----
+    print("== D1 时效衰减策略 ==")
+    now_t = time.time()
+    # 三个同代文件：旧 / 新近 / 极旧，用 os.utime 固定 mtime 排除干扰
+    tmpf = Path(tempfile.mkdtemp()) / "d1.md"
+    tmpf.write_text("x", encoding="utf-8")
+    os_utime(tmpf, now_t - 365 * 86400)  # 极旧
+    f_exp_old = time_factor(tmpf, now_t, 90, strategy="exponential")
+    f_lin_old = time_factor(tmpf, now_t, 90, strategy="linear")
+    check(f_lin_old < f_exp_old,
+          f"超过半衰期后 linear 比指数更快淘汰旧稿（{f_lin_old:g}<{f_exp_old:g}）")
+    os_utime(tmpf, now_t - 90 * 86400)  # 恰在半衰期
+    check(abs(time_factor(tmpf, now_t, 90, "exponential")
+              - time_factor(tmpf, now_t, 90, "linear")) < 1e-9,
+          "半衰期(90 天)处 exponential 与 linear 等值")
+    check(time_factor("missing_mtime_file", now_t, 90, strategy="linear") == 0.5,
+          "缺 mtime 各策略均中性 0.5")
+    check(time_factor("missing_mtime_file", now_t, 90, strategy="bogus") == 0.5,
+          "非法策略回落 exponential 且缺 mtime 中性")
+
+    # ---- D2 forget_quality 遗忘质量快照 ----
+    print("== D2 forget_quality ==")
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem_root = tmp / "mem"
+        long_dir = mem_root / "01-长期记忆"
+        long_dir.mkdir(parents=True)
+        old = long_dir / "过时主题-旧稿.md"
+        new = long_dir / "过时主题-新稿.md"
+        _write(old, "过时主题", "旧结论。", days_ago=90, project="D2")
+        _write(new, "过时主题", "新结论。", days_ago=0, project="D2")
+        stale = build_stale_map(mem_root)
+        # 命中旧稿 → 过时复用负指标拉低 composite
+        g_old = {"过时 主题": "过时主题-旧稿"}
+        q_old = forget_quality(mem_root, golden=g_old, stale_paths=stale)
+        g_new = {"过时 主题": "过时主题-新稿"}
+        q_new = forget_quality(mem_root, golden=g_new, stale_paths=stale)
+        for key in ("phase", "as_of", "totals", "retrieval", "composite"):
+            check(key in q_old, f"schema 含字段 {key}")
+        check(q_old["phase"] == "forget_quality", "phase 标注 forget_quality")
+        check(q_new["retrieval"]["stale_reuse_rate"] == 0.0,
+              "命中新稿 → stale_reuse_rate=0")
+        check(q_old["retrieval"]["stale_reuse_rate"] > q_new["retrieval"]["stale_reuse_rate"],
+              "命中旧稿 → stale_reuse_rate 升高")
+        check(q_old["totals"]["n_stale"] >= 1 and q_old["totals"]["stale_ratio"] > 0,
+              "totals 统计过时稿占比")
+        check(isinstance(q_old["composite"], (int, float)) and q_old["composite"] <= 1.0,
+              "composite 为 0..1 遗忘质量总分")
 
     return ok
 

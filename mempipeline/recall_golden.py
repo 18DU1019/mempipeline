@@ -12,6 +12,7 @@ Act（改 synonyms / 停用字 / 阈值）由人类显式触发，写回仍走 w
 """
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -121,3 +122,44 @@ def _suggest(miss: int) -> str:
     if miss == 0:
         return "no_action"
     return "check synonyms & stopchars; rerun check after edit"
+
+
+def forget_quality(mem_root: Path, tiers: Iterable[str] | None = None,
+                   synonyms: dict[str, list[str]] | None = None,
+                   golden: dict[str, str] | None = None,
+                   stale_paths: set[str] | None = None) -> dict:
+    """遗忘质量时间序列（D2，Forgetting-as-eval，纯只读）。
+
+    把「验证信号」由悬空的定性描述落地为一条稳定 schema 的可观测快照，
+    供周检 signal 落盘位按 append-only 累积成时间序列。只读不写、零状态。
+    对齐 Memora-FAMA / ForgetEval 的「过时复用即负指标」：
+      - totals.stale_ratio：过时旧稿占全库笔记比（timegrap valid_to 推导，C3 复用）；
+      - retrieval.stale_reuse_rate：golden 命中落入过时旧稿的比例（过时复用负指标）；
+      - retrieval.hit_rate / freshness：召回命中率及其被过时复用抑制后的净新鲜度；
+      - composite：(1 - stale_reuse_rate) * hit_rate，一条直观的遗忘质量总分。
+    缺省 golden/stale_paths 时按模块级常量与 timegrap 推导，测试应注入沙盒集。
+    """
+    from .protocol import TIER_DIR
+    from .recall import scan_tier_dirs
+    golden = golden if golden is not None else GOLDEN
+    stale = list(stale_paths) if stale_paths is not None else list(build_stale_map(mem_root))
+    tiers = list(tiers or TIER_DIR.values())
+    n = 0
+    for tier in tiers:
+        for d in scan_tier_dirs(mem_root, tier):
+            n += len(list(d.glob("*.md")))
+    res = check(mem_root, tiers=tiers, synonyms=synonyms,
+                golden=golden, stale_paths=set(stale))
+    n_res = max(1, len(res["results"]))
+    reuse_rate = res["stale_reuse"] / n_res
+    return {
+        "phase": "forget_quality",
+        "as_of": datetime.now().isoformat(timespec="seconds"),
+        "totals": {"n_notes": n, "n_stale": len(stale),
+                   "stale_ratio": round(len(stale) / n, 3) if n else 0.0},
+        "retrieval": {"golden_count": len(res["results"]),
+                      "hit_rate": res["hit_rate"],
+                      "stale_reuse_rate": round(reuse_rate, 3),
+                      "freshness": res["freshness"]},
+        "composite": round((1 - reuse_rate) * res["hit_rate"], 3),
+    }

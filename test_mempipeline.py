@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 from mempipeline.protocol import Note, TIER_DIR
 from mempipeline.audit import FileAudit
 from mempipeline.engine import write_atomic
-from mempipeline.recall import MemoryRecall
+from mempipeline.recall import MemoryRecall, TFIDFIndex
 from mempipeline.ingest import ingest
 
 
@@ -333,10 +333,69 @@ def test_project_isolation() -> bool:
     return ok
 
 
+def test_tfidf_index() -> bool:
+    """TFIDFIndex（SQLite 倒排）与 MemoryRecall 结果一致性 + 增量 build + 空索引安全。
+
+    P1-A2：验证倒排快路径的 Top-K 结果与全扫基准一致，且不触碰镜像（纯读索引）。
+    """
+    ok = True
+
+    def check(cond: bool, msg: str):
+        nonlocal ok
+        tag = "PASS" if cond else "FAIL"
+        print(f"  [{tag}] {msg}")
+        if not cond:
+            ok = False
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem_root = tmp / "mem"
+        (mem_root / "01-长期记忆").mkdir(parents=True)
+        (mem_root / "02-中期记忆").mkdir(parents=True)
+        (mem_root / "02-中期记忆" / "项目会话-仓位调度-1111.md").write_text(
+            "---\ntype: note\ntitle: 仓位调度\nsummary: 量化仓位\n"
+            "memory_tier: medium\n---\n\n量化仓位调度规则：按信号强度分配仓位。\n",
+            encoding="utf-8")
+        (mem_root / "02-中期记忆" / "项目会话-风险提示-2222.md").write_text(
+            "---\ntype: note\ntitle: 市场风险\nsummary: 风险\n"
+            "memory_tier: medium\n---\n\n市场风险提示：控制风险敞口。\n",
+            encoding="utf-8")
+
+        idx = TFIDFIndex(tmp / "idx.db")
+        # 未 build 时空索引：recall 应安全返回 []（不抛错），调用方自行回退
+        check(idx.recall("仓位 调度") == [], "未 build 时空索引安全返回 []")
+
+        built = idx.build(mem_root)
+        check(built == 2, f"首次 build 索引 2 篇 (实得 {built})")
+
+        # 一致性：倒排 vs 全扫基准，同查询 top-1 应指向同一篇
+        base = MemoryRecall(mem_root)
+        b1 = base.recall("仓位 调度", k=5)
+        i1 = idx.recall("仓位 调度", k=5)
+        check(bool(b1) and bool(i1), "两路均能召回")
+        if b1 and i1:
+            check(Path(b1[0][0]).name == Path(i1[0][0]).name,
+                  f"top-1 一致 (全扫={Path(b1[0][0]).name}, 倒排={Path(i1[0][0]).name})")
+
+        # 增量 build：新增 1 篇后再次 build，返回新增数（幂等）
+        (mem_root / "02-中期记忆" / "项目会话-定投-3333.md").write_text(
+            "---\ntype: note\ntitle: 定投\nsummary: 定投纪律\n"
+            "memory_tier: medium\n---\n\n每月固定日定投纪律。\n", encoding="utf-8")
+        added = idx.build(mem_root)
+        check(added == 1, f"增量 build 返回 1 (实得 {added})")
+        check(idx.count() == 3, f"索引计数口径=3 (实得 {idx.count()})")
+        # 空查询安全
+        check(idx.recall("") == [] and idx.recall("   ") == [], "空查询返回 []")
+        idx.close()
+    print("\nTFIDF INDEX (P1-A2):", "ALL PASS" if ok else "SOME FAILED")
+    return ok
+
+
 if __name__ == "__main__":
     main_result = main()
     crash_result = test_crash_recover_sidecar()
     tfidf_result = test_tfidf_recall()
     golden_result = test_recall_golden()
     iso_result = test_project_isolation()
-    sys.exit(0 if (main_result and crash_result and tfidf_result and golden_result and iso_result) else 1)
+    tx_result = test_tfidf_index()
+    sys.exit(0 if (main_result and crash_result and tfidf_result and golden_result and iso_result and tx_result) else 1)

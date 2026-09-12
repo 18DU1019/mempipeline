@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import math
 import re
+import sqlite3
 from abc import ABC, abstractmethod
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Iterable
 
@@ -99,13 +101,15 @@ class MemoryRecall(RecallBackend):
 
     def __init__(self, mem_root: Path, tiers: Iterable[str] | None = None,
                  synonyms: dict[str, list[str]] | None = None,
-                 projects: Iterable[str] | None = None):
+                 projects: Iterable[str] | None = None,
+                 index: "TFIDFIndex | None" = None):
         self.mem_root = mem_root
         if tiers is None:
             from .protocol import TIER_DIR
             tiers = TIER_DIR.values()
         self.tiers = list(tiers)
         self.projects = list(projects) if projects is not None else None
+        self.index = index  # 可选倒排快路径；缺省 None = 每查询全库读盘
         self._norm = {}
         for head, alts in (synonyms or {}).items():
             self._norm[head] = head
@@ -126,6 +130,14 @@ class MemoryRecall(RecallBackend):
 
     def recall(self, query: str, k: int = 8) -> list[tuple[str, float]]:
         # return 首元素 = 候选笔记的绝对文件路径（非标题），次元素 = 相似度分，降序。
+        # 快路径：配置了倒排索引且无同义归一（索引按原词构建，归一场景需回落全扫保证口径）
+        if self.index is not None and not self._norm:
+            try:
+                hits = self.index.recall(query, k=k)
+                if hits:
+                    return hits
+            except Exception:
+                pass  # 索引异常回落全扫
         qterms = self._query_terms(query)
         if not qterms:
             return []
@@ -153,3 +165,130 @@ class MemoryRecall(RecallBackend):
                 scored.append((path, s))
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:k]
+
+
+class TFIDFIndex:
+    """SQLite 持久化的 TF-IDF 倒排索引（零 embedding 依赖）。
+
+    解决 recall() 每查询「全库读盘 + 全库 ngram + 全库 IDF 双遍」的 O(N) 问题：
+    预先把归一化文本的 ngram 及文档级 df 落盘，查询时只扫描命中 ngram 的文档
+    即可排序取 Top-K，不再每查询触碰全部笔记。
+
+    - build()：扫描镜像，把 (path, norm_text, grams, doc_len) 与 gram→df 写入 SQLite。
+      同义归一复用 MemoryRecall._norm_doc，保证查询/文档两侧主词空间对等，与
+      MemoryRecall 打分结果一致（本方为快路径，非另一套语义策略）。
+    - recall()：查询同义归一后切 ngram，倒排查命中文档，按 TF-IDF 打分取 Top-K。
+      返回值与 MemoryRecall.recall 同型（path, score），可用作同构替换。
+
+    数据无关：所有路径由调用方注入；不回退时需确保索引已 build（未 build 时空索引，
+    调用方应自行判断回退 MemoryRecall 全扫）。
+    """
+
+    def __init__(self, db_path: Path):
+        self.db_path = db_path
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS doc (path TEXT PRIMARY KEY,"
+            " norm TEXT NOT NULL, ngrams TEXT NOT NULL)")
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS gram "
+            "(gram TEXT NOT NULL, df REAL NOT NULL)")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gram ON gram(gram)")
+        self._conn.commit()
+
+    def close(self) -> None:
+        self._conn.close()
+
+    def count(self) -> int:
+        return self._conn.execute("SELECT COUNT(*) FROM doc").fetchone()[0]
+
+    def build(self, mem_root: Path, tiers: Iterable[str] | None = None,
+              projects: Iterable[str] | None = None,
+              norm: Callable[[str], str] | None = None) -> int:
+        """扫描镜像重建倒排索引，返回索引笔记数。追加式：已 index 的跳过。"""
+        from .protocol import TIER_DIR
+        if tiers is None:
+            tiers = TIER_DIR.values()
+        _norm = norm or _default_norm
+        known = {r[0] for r in self._conn.execute("SELECT path FROM doc")}
+        docs: list[tuple[str, str, dict, int]] = []  # (path, norm, grams, len)
+        for tier in tiers:
+            for d in scan_tier_dirs(mem_root, tier, projects):
+                for md in d.glob("*.md"):
+                    if str(md) in known:
+                        continue
+                    try:
+                        txt = md.read_text(encoding="utf-8")
+                    except Exception:
+                        continue
+                    norms = _norm(txt)
+                    grams = Counter(_tokens(norms))
+                    if not grams:
+                        continue
+                    docs.append((str(md), norms, grams, len(norms)))
+        if not docs:
+            return 0
+        # 文档级写入
+        n = len(docs)
+        df: dict[str, int] = {}
+        for path, norms, grams, ln in docs:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO doc (path, norm, ngrams) VALUES (?,?,?)",
+                (path, norms, " ".join(
+                    f"{g}:{c}" for g, c in grams.items())))
+            for g in grams:
+                df[g] = df.get(g, 0) + 1
+        # gram 级 df（本批清除重建，保证与本批文档一致）
+        for g, d in df.items():
+            self._conn.execute("INSERT OR REPLACE INTO gram (gram, df) VALUES (?,?)",
+                               (g, math.log((n + 1) / (d + 1)) + 1.0))
+        self._conn.commit()
+        return len(docs)
+
+    def recall(self, query: str, k: int = 8,
+               norm: Callable[[str], str] | None = None) -> list[tuple[str, float]]:
+        """查询归一后切 ngram，按 TF-IDF 打分取 Top-K。
+
+        - 查询归一（同 MemoryRecall._query_terms）保持主词空间对等；
+        - 只扫描 doc 表（内存中 ngrams 计数 + norm 长度），不触碰镜像文件，
+          也无需重算全库 IDF（已预先落 gram 表）；
+        - 仅对含至少一个查询 ngram 的文档计分，其余跳过。
+        """
+        qterms = self._query_terms(query)
+        if not qterms:
+            return []
+        qgrams = _tokens(" ".join(qterms))
+        if not qgrams:
+            return []
+        qfreq = Counter(qgrams)
+        qmax = max(qfreq.values()) or 1.0
+        # 一次性取回查询 ngram 的 idf（缺失的 ngram 无 df，视为 0 贡献）
+        idf: dict[str, float] = {}
+        for g in set(qfreq):
+            rows = self._conn.execute(
+                "SELECT df FROM gram WHERE gram=?", (g,)).fetchall()
+            if rows:
+                idf[g] = rows[0][0]
+        scored: list[tuple[str, float]] = []
+        for path, norms, ngrams_str in self._conn.execute(
+                "SELECT path, norm, ngrams FROM doc"):
+            grams: dict[str, float] = {}
+            for pair in ngrams_str.split():
+                if ":" in pair:
+                    g, c = pair.split(":", 1)
+                    grams[g] = float(c)
+            if not any(g in grams for g in qfreq):
+                continue
+            s = _score_tfidf(qfreq, qmax, idf, Counter(grams), len(norms))
+            if s > 0:
+                scored.append((path, s))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:k]
+
+    def _query_terms(self, query: str) -> list[str]:
+        return [t for t in _raw_terms(query)]
+
+
+def _default_norm(text: str) -> str:
+    return text

@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 from mempipeline.audit import FileAudit  # noqa: E402
 from mempipeline.governance import (  # noqa: E402
     filter_note, score_note, stale_days, transition, review_queue, vault_status,
-    scan_stale_notes, VALID_TRANSITIONS,
+    scan_stale_notes, governance_health, VALID_TRANSITIONS,
 )
 from mempipeline.protocol import Note, TIER_DIR  # noqa: E402
 from mempipeline.engine import write_atomic  # noqa: E402
@@ -97,6 +97,17 @@ def main() -> bool:
         q = review_queue(mem_root)
         check(out2 in q and out not in q,
               f"候选队列含 candidate 笔记、不含 rejected 笔记（{len(q)} 条）")
+
+        # 5.5 治理健康度快照（P1-诊断新增，周检③）——需在临时目录销毁前调用
+        # 此时镜像两篇：规则(rejected) + 经验(candidate)，无 promoted
+        print("== 治理健康度 ==")
+        h = governance_health(mem_root)
+        check(h["by_status"].get("candidate") == 1 and
+              h["by_status"].get("rejected") == 1,
+              f"health 统计 candidate/rejected（{h['by_status']}）")
+        check(h["candidate_pending"] == 1, f"候选队列计数 1（{h['candidate_pending']}）")
+        check(h["non_active_ratio"] > 0, f"非 active 占比>0（{h['non_active_ratio']}）")
+        check(sum(h["by_status"].values()) == 2, "health 总计 2 篇")
 
     # ---- 5. vault 映射 ----
     print("== vault 映射 ==")

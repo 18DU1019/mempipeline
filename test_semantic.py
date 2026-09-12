@@ -93,6 +93,19 @@ def main() -> bool:
                                    projects=["dora"])
         check(bool(h_fallback), "index=None 时回落纯 TF-IDF 不抛错")
 
+        # ---- 5. 注入带 TFIDFIndex 的 memory（panel P1-A2 接线路径）----
+        from mempipeline.recall import MemoryRecall, TFIDFIndex
+        tf_index = TFIDFIndex(tmp / "tf_idx.db")
+        try:
+            tf_index.build(mem_root)
+            m_idx = MemoryRecall(mem_root, index=tf_index)
+            h_mem = hybrid_recall(q1, k=3, mem_root=mem_root, index=idx,
+                                  projects=["dora"], memory=m_idx)
+            check(bool(h_mem) and "dora" in h_mem[0][0],
+                  f"注入带索引 memory 的 hybrid 命中 dora（top={Path(h_mem[0][0]).name if h_mem else '无'}）")
+        finally:
+            tf_index.close()
+
         idx.close()
     print("\nSEMANTIC (E2'):", "ALL PASS" if ok else "SOME FAILED")
     return ok

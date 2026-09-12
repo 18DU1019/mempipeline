@@ -8,5 +8,8 @@ dist/
 # Local runtime artifacts (not committed)
 example_data/
 
+# Python coverage artifact
+.coverage
+
 # Real user config (never commit; only config.example.py sample is committed)
 config.py

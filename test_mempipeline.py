@@ -394,6 +394,19 @@ def test_tfidf_index() -> bool:
         added_dup = idx.build(mem_root)
         check(added_dup == 0, f"A3 同内容不重复入库 (added={added_dup})")
         check(idx.count() == 3, f"A3 内容去重后计数仍 3 (实得 {idx.count()})")
+        # schema 迁移（A3 ASI06 演进）：旧版 DB 的 doc 表缺 ckey 列，
+        # CREATE TABLE IF NOT EXISTS 不补列 → TFIDFIndex 应丢弃重建，而不是建崩。
+        import sqlite3
+        mig = tmp / "old.db"
+        _c = sqlite3.connect(str(mig))
+        _c.execute("CREATE TABLE doc (path TEXT PRIMARY KEY,"
+                   " norm TEXT NOT NULL, ngrams TEXT NOT NULL)")
+        _c.execute("CREATE TABLE gram (gram TEXT NOT NULL, df REAL NOT NULL)")
+        _c.commit(); _c.close()
+        mig_idx = TFIDFIndex(mig)
+        mcols = [r[1] for r in mig_idx._conn.execute("PRAGMA table_info(doc)")]
+        check("ckey" in mcols, f"旧 schema 迁移自动补 ckey 列 (实得 {mcols})")
+        mig_idx.close()
         idx.close()
     print("\nTFIDF INDEX (P1-A2):", "ALL PASS" if ok else "SOME FAILED")
     return ok

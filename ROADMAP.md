@@ -103,6 +103,8 @@
 
 验收：`test_governance.py` D3 段（旧稿进 superseded、新稿不标、带 supersede 建议、不改状态）全过；全套件回归绿。mempipeline 仓提交 `535c65f`。
 
+> **D3 复核修正（2026-09-12）**：复核首周基线发现 67 条 superseded 全部为**跨层伪报**——subject 簇按 project_id 聚簇，「项目约束」（长期）+「项目会话」（中期）跨层异构对被判为"旧稿被新稿取代"。根因：`valid_to` 在跨层判定(line 425)前无条件赋值。修复 `timegrap._derive_signals`：`valid_to` 仅在同层相邻对成立（与 content-relation 同层守卫同一语义），跨层对置 None。真实镜像 superseded 67→0。
+
 ### ∮ 下一阶段候选演进（对照 2025–26 前沿·最新复核，拟议待裁决）
 
 来源（一手为主；2026-06 联网复核）：

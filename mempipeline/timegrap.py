@@ -402,12 +402,17 @@ class TimelineGraph:
         tl.signals = []
         for i, n in enumerate(nodes):
             rec: dict = {"idx": i, "path": n.path, "time_src": n.time_src}
-            # B4 时序边 valid-from/to：本条内容「谁时生效、何时被下一稿取代」。
+            # B4 时序边 valid-from/to：本条内容「何时生效、何时被下一稿取代」。
             # valid_from=本稿时间；valid_to=下一稿时间（末稿 None=仍现行），
             # 对齐 Graphiti「belief 何时生效 / 何时被 supersede」。
             nxt = nodes[i + 1] if i + 1 < len(nodes) else None
             rec["valid_from"] = n.when.isoformat() if n.when else None
-            rec["valid_to"] = nxt.when.isoformat() if (nxt and nxt.when) else None
+            # D3 边界：valid_to（被下一稿取代）只在同层相邻对成立。跨层对是异构文档角色
+            # （长期约束 vs 中期会话，实测 2026-09 全库 67 条 superseded 全部为此伪报），
+            # 不是同一记录的旧稿/新稿。与下方 content-relation 的同层守卫(line 425)同一语义，
+            # 跨层对置 None → 不产生伪 superseded。
+            same_tier_next = bool(nxt and n.tier and n.tier == nxt.tier)
+            rec["valid_to"] = nxt.when.isoformat() if (same_tier_next and nxt.when) else None
             if n.when is None:
                 rec["flag"] = "untimed"          # 无时间戳（极小概率）
                 tl.signals.append(rec)

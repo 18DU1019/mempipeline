@@ -199,6 +199,8 @@ def main() -> bool:
                   "跨层对不输出 drift/duplicate")
             check(tl4.signals[1].get("relation_scope") == "cross-tier",
                   "跨层对标注 relation_scope=cross-tier")
+            check(tl4.signals[0]["valid_to"] is None,
+                  "跨层对首稿 valid_to=None（不产生 D3 superseded）")
             check([n.tier for n in tl4.nodes] == ["01-长期记忆", "02-中期记忆"],
                   "节点带层标记（跨层判定的依据）")
 

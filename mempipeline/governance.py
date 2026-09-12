@@ -190,10 +190,22 @@ def _read_fm_value(fm: str, key: str) -> str | None:
     return unquote(mm.group(1).strip())
 
 
+def _path_writer(path: str | None) -> str | None:
+    """读某路径笔记 frontmatter 的 writer_id（读不到返回 None，不抛）。"""
+    if not path:
+        return None
+    try:
+        txt = Path(path).read_text(encoding="utf-8")
+    except Exception:
+        return None
+    return _read_fm_value(txt.split("---", 2)[1], "writer_id") if txt.startswith("---") else None
+
+
 def scan_stale_notes(mem_root: Path, tiers: Iterable[str] | None = None,
                      projects: Iterable[str] | None = None,
                      threshold: float = ARCHIVE_THRESHOLD,
-                     timeline: dict | None = None) -> list[dict]:
+                     timeline: dict | None = None,
+                     non_governable_writers: set[str] | None = None) -> list[dict]:
     """P1 质量扫描：自动标记旧/冷/冗余候选，只出清单、不自动改状态。
 
     遍历各 tier 笔记，按 stale_days 与 score_note 算（旧度、评分），把 score
@@ -243,6 +255,10 @@ def scan_stale_notes(mem_root: Path, tiers: Iterable[str] | None = None,
     if timeline:
         out = _merge_signal_candidates(out,
                                        _timeline_signal_candidates(timeline))
+    if non_governable_writers:
+        # E2：剔除不可治理写者的候选来源（staging_ingest 等外部稿，尊重不覆灭他人稿）
+        out = [c for c in out
+               if _path_writer(c.get("path")) not in non_governable_writers]
     return out
 
 

@@ -18,9 +18,11 @@
   - **项目 token：158 簇 / 66 个多节点簇 / 最大簇 2 / 零假合并**（精确键不可能假合并）
 取值优先级：`project_id`（声明字段，权威）→ 文件名锚定模式 `(项目约束|项目会话)-{hex}`
 → 标题 `（{hex}）` → 以上皆无则回落原字符集合指纹（保住既有单测语义）。
-**注意**：本镜像 frontmatter 的 `project_id` 覆盖率为 0/224，故当前实际生效的是
-正则回落。这是**耦合生产者命名约定的临时补丁**——正确解是让两个写者
-（`distill_memory._fm()` / `staging_ingest._as_note()`）输出 `project_id`。
+**注意**：本镜像 frontmatter 的 `project_id` 覆盖率（2026-09-12 实测）172/235，其中
+项目约束族 67/67（100%）、项目会话族 105/166（63%）。覆盖率随周检经 E3 探针追踪，
+族际差异由后端 P3-0 回填推进；缺失的会话族此刻仍在走正则回落——这是**耦合生产者
+命名约定的临时补丁**，正确解是让两个写者（`distill_memory._fm()` / `staging_ingest._as_note()`）
+输出 `project_id`（P3-2 已让写者产，覆盖由回填补全）。
 标题/文件名格式一旦变动，token 提取会静默退化回「每篇一簇」且不报警。
 
 信号合法性与时间 horizon（P3-1 实测）：
@@ -106,7 +108,8 @@ def project_topic_token(*, project_id: str | None = None, title: str = "",
 
     优先级：`project_id`（声明字段，权威）→ 文件名锚定模式 → 标题 `（hex）`。
     实测（2026-09-11，224 篇）：title 命中 170 篇、filename 命中 170 篇、
-    `project_id` 命中 **0 篇**（字段已声明但生产者从不填）。
+    `project_id` 命中 0 篇；2026-09-12（E1 后实测）`project_id` 命中 172/235。
+    当给入 project_id 时本函数直接取字段（权威优先），无则走回落。
     """
     if project_id:
         v = str(project_id).strip()

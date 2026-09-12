@@ -124,5 +124,24 @@
 
 **下一轮裁决范围**：D 段 D1/D2/D3 已全部落地（P3.7/P3.8）。候选余量回到架构侧长线（C1 写侧 agentic 双向链接 / MaRS 差分隐私 / MindMemOS 自进化 schema）——均需打破当前硬约束，**不建议本轮推进**；D 段价值已在观测序列落地，建议先随周检跑数周积累 forget-quality 样本再决断。
 
+### P3.10 E 段：写者身份与可转移约束（写者可迁移的落地，2026-09-13）
+
+**缘起**：timegrap 主题键靠文件名正则回落，耦合生产者命名约定（P3-1 标注债）。写者是隐式主体、约束硬编码进生产者，无法迁移。联网复核获证（AWS Hermes 一等公民 provenance + 按写者切治理作用域；agent-first 协议 single-writer 须显式声明；Mem0 从图撤退到 canonical id）。
+
+**落地三件（纯增量可逆，默认关/只读）**：
+- `[x]` **E1 写者身份**：两生产者 frontmatter 自标 `writer_id`（distill_memory / staging_ingest）；`_stable` 剔除集补 `writer_id`（幂等与文件名 key 不受影响）；`kb_add_writer_id.py` 迁移工具一次补写 235 篇。脚本仓提交，库精确 add 不 commit。
+- `[x]` **E2 约束数据化**：`writer_contracts.py` 纯数据注册表（allowed_tiers / project_scope family·optional / governable）+ 只读 `check_contract`；`scan_stale_notes(non_governable_writers=)` 过滤不可治理写者候选来源（staging 默认不可治理，尊重不覆灭他人稿）。`test_writer_contracts.py` 验收 10/10。
+- `[x]` **E3 可转移 + 解耦探针**：timegrap 陈旧注释纠正（实测 project_id 172/235）；周检⑨新增 `writer_coverage_signal` 探针（各写者 project_id 覆盖率 + 项目族回落篇数代理）；**转移 = 改登记表 + 停旧写者入口，只动数据不动 engine/governance**。
+
+**Runbook：写者可转移**（不做状态机，写入=改数据）
+1. 新写者：在 `mempipeline/writer_contracts.py` 的 `WRITER_CONTRACTS` 加一行（写者id→allowed_tiers/project_scope/governable），并在其 frontmatter 模板产出对应 `writer_id`。
+2. 切换写者：更新写入口（原生产者的 `_write`/`_as_note` 改由新写者驱动），字段口径经 `check_contract` 校验；旧写者入口不再被调用。
+3. 约束归属自动生效：timegrap 主题键读 `project_id`（权威）；治理候选按 `governable` 过滤；周检探针按 `writer_id` 报覆盖。
+4. 全程只读/数据驱动，engine 写路径与 governance 状态机零改动。
+
+> 诚实标注：`writer_id` 是溯源标签（自声明），非防伪证明（Major Labs 六系统实测：memory provenance 普遍不可签名）；防伪线依赖 git + audit_core，本地单人场景不上密码学签名（过度）。
+
+**推荐下一候选**：无——E 段三件已闭环，写者约束数据化 + 可转移 + 可观测齐备，与回收长线（C1/MaRS/MindMemOS）均不推进。进入观测期，周检随 D2+E3 探针累积样本。
+
 ---
 生成：ROADMAP v0.2（2026-09-12 联网复核并规划 D 段）。拟议阶段非既定计划。

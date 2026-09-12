@@ -94,6 +94,15 @@
 
 验收：`test_evolution.py` D1/D2 段（linear 越半衰更强淘汰、半衰期等值、非法策略回落；forget_quality schema 与 stale_reuse_rate 升降）全过；全套件回归绿。mempipeline 仓 push master 至 `8f6635c`。
 
+### P3.8 软失效状态显式化（D3，2026-09-12 落地推送 + 周检接线）
+
+| 编号 | 内容 | 落点 |
+|------|------|------|
+| D3 | `_timeline_signal_candidates` 新增 `superseded` 候选：`valid_windows()` 中 valid_to 非空（已被同主题后续稿取代）的过时旧稿 → `suggestion=supersede`，只出候选、**不改写文件**（对齐 Mem0 ADD-only / Claude 审计可回滚零删除）；与 drift/revived 按路径去重 | `mempipeline/governance.py` |
+| D3-线 | 周检 `stale_scan(timeline=)` 传入单次建图结果，D3 superseded 与 drift/revived 并入同一陈旧扫描候选，报告⑨可见 | `_agent运行台\脚本\weekly_health.py`（c5936c6） |
+
+验收：`test_governance.py` D3 段（旧稿进 superseded、新稿不标、带 supersede 建议、不改状态）全过；全套件回归绿。mempipeline 仓提交 `535c65f`。
+
 ### ∮ 下一阶段候选演进（对照 2025–26 前沿·最新复核，拟议待裁决）
 
 来源（一手为主；2026-06 联网复核）：
@@ -104,14 +113,14 @@
 **推荐 D 段（写作/观测侧，低风险纯增量，golden 兜底）**
 - ~~**D1 时效衰减策略可选化**~~ `[x]`：`time_weight=0` 默认现状，golden 兜底；已落地 P3.7。
 - ~~**D2 遗忘即评测（Forgetting-as-eval）**~~ `[x]`：forget-quality 时间序列已接入周检落盘位，悬空「验证信号」落地为量化指标；已落地 P3.7。
-- **D3 软失效状态显式化** `[ ]`：把 timegrap valid_to 推导的过时旧稿映射为候选 `superseded` 提示（只出状态建议、不改写文件），与 scan_stale_notes / P3-③ 同构；软删除/零删除对齐 Mem0 ADD-only + Claude 审计可回滚。
+- **D3 软失效状态显式化** `[x]`：valid_to 取代的过时旧稿 → `superseded` 候选（只建议不改写），与 scan_stale_notes / P3-③ 同构；已落地 P3.8。
 
 **回收长线（需裁决打破当前约束，不推荐本轮）**
 - C1 Agentic 双向链接（写侧入库检索历史并回写）：写路径引入 agentic 循环，**违背「LLM 任务 stateless、无执行循环」硬约束**。
 - MaRS 差分隐私遗忘（(ε,δ)-DP）：单人本地单用户场景隐私收益有限。
 - MindMemOS 自我进化 schema / EDUD 事件级记忆：需 LLM 自我 schema 演化或大变构，冲击现有 project token 主题键，高风险。
 
-**推荐组合（下一轮裁决范围）**：D1/D2 已落地；**D3（软失效状态显式化）** 为下一候选，与 P3-③ 重叠，可并入 D2 观测序列一起推进。C1/MaRS-DP/MindMemOS 归档长线。
+**下一轮裁决范围**：D 段 D1/D2/D3 已全部落地（P3.7/P3.8）。候选余量回到架构侧长线（C1 写侧 agentic 双向链接 / MaRS 差分隐私 / MindMemOS 自进化 schema）——均需打破当前硬约束，**不建议本轮推进**；D 段价值已在观测序列落地，建议先随周检跑数周积累 forget-quality 样本再决断。
 
 ---
 生成：ROADMAP v0.2（2026-09-12 联网复核并规划 D 段）。拟议阶段非既定计划。

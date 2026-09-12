@@ -95,11 +95,11 @@ def _title_of(md: Path) -> str:
 
 # --- 项目 token 提取（P3-1：主题键的精确来源）---
 # 标题形态：`项目约束（6165c7）` / `项目会话（6165c7）`
-_TOKEN_TITLE = __import__("re").compile(r"（([0-9a-f]{6,8})）")
+_TOKEN_TITLE = re.compile(r"（([0-9a-f]{6,8})）")
 # 文件名形态（锚定）：`项目约束-6165c7.md` / `项目会话-6165c7.md`
 # 锚定是必要的：WorkBuddy 侧文件名 `项目会话-{中文标题}-{8hex}` 尾部的 8hex 是
 # **内容哈希（条目身份）而非项目 token**，锚定模式天然把它排除，避免误当主题键。
-_TOKEN_FILENAME = __import__("re").compile(r"^(?:项目约束|项目会话)-([0-9a-f]{6,8})$")
+_TOKEN_FILENAME = re.compile(r"^(?:项目约束|项目会话)-([0-9a-f]{6,8})$")
 
 
 def project_topic_token(*, project_id: str | None = None, title: str = "",

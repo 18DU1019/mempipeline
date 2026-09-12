@@ -250,24 +250,28 @@ class TFIDFIndex:
         if not docs:
             return 0
         # 文档级写入
-        n = len(docs)
-        df: dict[str, int] = {}
         for path, _ckey, norms, grams, ln in docs:
             self._conn.execute(
                 "INSERT OR REPLACE INTO doc (path, ckey, norm, ngrams) VALUES (?,?,?,?)",
                 (path, _ckey, norms, " ".join(
                     f"{g}:{c}" for g, c in grams.items())))
-            for g in grams:
-                df[g] = df.get(g, 0) + 1
-        # gram 级 df（本批清除重建，保证与本批文档一致）
-        for g, d in df.items():
-            self._conn.execute("INSERT OR REPLACE INTO gram (gram, df) VALUES (?,?)",
-                               (g, math.log((n + 1) / (d + 1)) + 1.0))
+        # gram 级 df（全量重算）：doc 表含历史已索引文档，逐批 REPLACE 会丢失旧批
+        # 贡献导致 idf 随增量 build 漂移，故每轮从 doc 表全量统计，语义恒等于全库。
+        df: dict[str, int] = {}
+        for (ngrams_str,) in self._conn.execute("SELECT ngrams FROM doc"):
+            for pair in ngrams_str.split():
+                if ":" in pair:
+                    g = pair.split(":", 1)[0]
+                    df[g] = df.get(g, 0) + 1
+        n = self._conn.execute("SELECT COUNT(*) FROM doc").fetchone()[0]
+        self._conn.execute("DELETE FROM gram")
+        self._conn.executemany(
+            "INSERT INTO gram (gram, df) VALUES (?,?)",
+            ((g, math.log((n + 1) / (d + 1)) + 1.0) for g, d in df.items()))
         self._conn.commit()
         return len(docs)
 
-    def recall(self, query: str, k: int = 8,
-               norm: Callable[[str], str] | None = None) -> list[tuple[str, float]]:
+    def recall(self, query: str, k: int = 8) -> list[tuple[str, float]]:
         """查询归一后切 ngram，按 TF-IDF 打分取 Top-K。
 
         - 查询归一（同 MemoryRecall._query_terms）保持主词空间对等；

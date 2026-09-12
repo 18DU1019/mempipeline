@@ -109,6 +109,13 @@ def main() -> bool:
             # 每条信号含阈值（可配置可追溯）
             check(all(s.get("drift_threshold") == DRIFT_THRESHOLD for s in tl.signals[1:]),
                   "漂移阈值显式写进信号（非 magic number）")
+            # B4 时序边 valid-from/to：编码「内容何时生效 / 何时被取代」
+            vw = tl.valid_windows()
+            check(len(vw) == 3, f"valid_windows 3 条（实得 {len(vw)}）")
+            check(vw[2]["valid_to"] is None, "末稿 valid_to=None（仍现行）")
+            check(vw[0]["valid_from"] and vw[0]["valid_to"]
+                  and vw[0]["valid_from"] < vw[0]["valid_to"],
+                  "首稿生效窗口 from<to（被稿2取代）")
 
     # ---- 5. 缺时间字段回落 mtime ----
     print("== 缺时间字段回落 mtime ==")

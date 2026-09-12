@@ -9,6 +9,7 @@ TF-IDF」做相关度打分：把 query 与候选笔记都切成 2-4 字字符 n
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 import sqlite3
@@ -189,7 +190,12 @@ class TFIDFIndex:
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS doc (path TEXT PRIMARY KEY,"
-            " norm TEXT NOT NULL, ngrams TEXT NOT NULL)")
+            " ckey TEXT, norm TEXT NOT NULL, ngrams TEXT NOT NULL)")
+        # A3 ASI06：内容键 UNIQUE 索引 —— 相同归一内容的笔记跨路径只能入库一次，
+        # 在 schema 层兜住「同内容重复/污染注入」，不靠 Python 逻辑单一兜底。
+        self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_ckey"
+            " ON doc(ckey) WHERE ckey IS NOT NULL")
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS gram "
             "(gram TEXT NOT NULL, df REAL NOT NULL)")
@@ -212,7 +218,9 @@ class TFIDFIndex:
             tiers = TIER_DIR.values()
         _norm = norm or _default_norm
         known = {r[0] for r in self._conn.execute("SELECT path FROM doc")}
-        docs: list[tuple[str, str, dict, int]] = []  # (path, norm, grams, len)
+        known_ckeys = {r[0] for r in self._conn.execute(
+            "SELECT ckey FROM doc WHERE ckey IS NOT NULL")}
+        docs: list[tuple[str, str, str, dict, int]] = []  # (path, ckey, norm, grams, len)
         for tier in tiers:
             for d in scan_tier_dirs(mem_root, tier, projects):
                 for md in d.glob("*.md"):
@@ -226,16 +234,20 @@ class TFIDFIndex:
                     grams = Counter(_tokens(norms))
                     if not grams:
                         continue
-                    docs.append((str(md), norms, grams, len(norms)))
+                    ckey = hashlib.sha256(norms.encode("utf-8")).hexdigest()
+                    if ckey in known_ckeys:
+                        continue  # A3 ASI06：同内容已索引，防重复/污染
+                    known_ckeys.add(ckey)
+                    docs.append((str(md), ckey, norms, grams, len(norms)))
         if not docs:
             return 0
         # 文档级写入
         n = len(docs)
         df: dict[str, int] = {}
-        for path, norms, grams, ln in docs:
+        for path, _ckey, norms, grams, ln in docs:
             self._conn.execute(
-                "INSERT OR REPLACE INTO doc (path, norm, ngrams) VALUES (?,?,?)",
-                (path, norms, " ".join(
+                "INSERT OR REPLACE INTO doc (path, ckey, norm, ngrams) VALUES (?,?,?,?)",
+                (path, _ckey, norms, " ".join(
                     f"{g}:{c}" for g, c in grams.items())))
             for g in grams:
                 df[g] = df.get(g, 0) + 1

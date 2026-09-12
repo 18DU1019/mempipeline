@@ -386,6 +386,14 @@ def test_tfidf_index() -> bool:
         check(idx.count() == 3, f"索引计数口径=3 (实得 {idx.count()})")
         # 空查询安全
         check(idx.recall("") == [] and idx.recall("   ") == [], "空查询返回 []")
+        # A3 ASI06：同内容跨路径重复入库 -> 内容键去重（防重复/污染）
+        build = (mem_root / "02-中期记忆")
+        dup_src = ("---\ntype: note\ntitle: 仓位调度\nsummary: 量化仓位\n"
+                   "memory_tier: medium\n---\n\n量化仓位调度规则：按信号强度分配仓位。\n")
+        (build / "重复同内容-7777.md").write_text(dup_src, encoding="utf-8")
+        added_dup = idx.build(mem_root)
+        check(added_dup == 0, f"A3 同内容不重复入库 (added={added_dup})")
+        check(idx.count() == 3, f"A3 内容去重后计数仍 3 (实得 {idx.count()})")
         idx.close()
     print("\nTFIDF INDEX (P1-A2):", "ALL PASS" if ok else "SOME FAILED")
     return ok

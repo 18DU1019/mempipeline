@@ -12,10 +12,12 @@ bigram Jaccard / tag_relevance 均为字符级）。本模块：
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import sqlite3
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -73,6 +75,15 @@ class SemanticIndex:
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS emb (path TEXT PRIMARY KEY,"
             " vec BLOB NOT NULL, tier TEXT, project TEXT)")
+        # A1 语义缓存：qemb 缓存查询嵌入（省最贵的 Ollama 网络调用）；
+        # qres 缓存 top-k 结果，按 gen 代数失效（与索引 build 新鲜度一致）；
+        # meta 存 gen 计数器。
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS qemb (q TEXT PRIMARY KEY, vec BLOB NOT NULL, ts TEXT)")
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS qres (q TEXT, scope TEXT, k INTEGER, gen INTEGER,"
+            " results TEXT, ts TEXT, PRIMARY KEY (q, scope, k))")
+        self._conn.execute("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)")
         self._conn.commit()
 
     def close(self) -> None:
@@ -133,6 +144,7 @@ class SemanticIndex:
             vecs = embed_fn([t for _, t, _, _ in chunk])
             for (rel, _t, tier, proj), vec in zip(chunk, vecs):
                 self.add(rel, vec, tier, proj)
+        self._bump_gen()  # 建了索引才换代，检索/top-k 缓存随代数失效
         return len(docs)
 
     def recall(self, query_vec: list[float], k: int = 8,
@@ -153,6 +165,55 @@ class SemanticIndex:
 
     def count(self) -> int:
         return self._conn.execute("SELECT COUNT(*) FROM emb").fetchone()[0]
+
+    def gen(self) -> int:
+        """语义索引代数：build 有新增时 +1，作为查询/结果缓存的失效键。"""
+        row = self._conn.execute("SELECT v FROM meta WHERE k='gen'").fetchone()
+        return int(row[0]) if row and row[0].isdigit() else 1
+
+    def _bump_gen(self) -> int:
+        g = self.gen() + 1
+        self._conn.execute(
+            "INSERT INTO meta (k, v) VALUES ('gen', ?)"
+            " ON CONFLICT(k) DO UPDATE SET v=excluded.v", (str(g),))
+        self._conn.commit()
+        return g
+
+    def query_embed(self, query: str, embed_fn: EmbedFn) -> list[float]:
+        """查询嵌入缓存（A1）：同查询命中复用，否则调 embed_fn 并落库。幂等。失败抛异常。"""
+        h = hashlib.sha256(query.encode("utf-8")).hexdigest()
+        row = self._conn.execute("SELECT vec FROM qemb WHERE q=?", (h,)).fetchone()
+        if row:
+            return self._unpack(row[0])
+        vec = embed_fn([query])[0]
+        self._conn.execute(
+            "INSERT OR REPLACE INTO qemb (q, vec, ts) VALUES (?,?,?)",
+            (h, self._pack(vec), datetime.now().isoformat(timespec="seconds")))
+        self._conn.commit()
+        return vec
+
+    def recall_cached(self, query: str, qvec: list[float], k: int = 8,
+                      projects: Iterable[str] | None = None) -> list[tuple[str, float]]:
+        """top-k 结果缓存（A1）：gen 一致时复用，否则现算并落库。失效只影响首次。"""
+        scope = "|".join(sorted(projects or []))
+        g = self.gen()
+        h = hashlib.sha256(query.encode("utf-8")).hexdigest()
+        row = self._conn.execute(
+            "SELECT gen, results FROM qres WHERE q=? AND scope=? AND k=?",
+            (h, scope, k)).fetchone()
+        if row and int(row[0]) == g:
+            return [(p, float(s)) for p, s in json.loads(row[1])]
+        res = self.recall(qvec, k, projects=projects)
+        try:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO qres (q, scope, k, gen, results, ts)"
+                " VALUES (?,?,?,?,?,?)",
+                (h, scope, k, g, json.dumps(res),
+                 datetime.now().isoformat(timespec="seconds")))
+            self._conn.commit()
+        except Exception:
+            pass  # 缓存写失败不阻断召回
+        return res
 
 
 def hybrid_recall(query: str, k: int = 8, mem_root: Path | None = None,
@@ -175,8 +236,8 @@ def hybrid_recall(query: str, k: int = 8, mem_root: Path | None = None,
     if index is None:
         return [(p, 1.0 / (i + 1)) for i, p in enumerate(lex[:k])]
     try:
-        qvec = embed_fn([query])[0]
+        qvec = index.query_embed(query, embed_fn)
     except Exception:
         return [(p, 1.0 / (i + 1)) for i, p in enumerate(lex[:k])]  # 语义失败回落
-    sem = [p for p, _ in index.recall(qvec, k * 3, projects=projects)]
+    sem = [p for p, _ in index.recall_cached(query, qvec, k * 3, projects=projects)]
     return rrf_fuse([lex, sem])[:k]

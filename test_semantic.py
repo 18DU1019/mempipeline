@@ -107,6 +107,34 @@ def main() -> bool:
             tf_index.close()
 
         idx.close()
+
+        # ---- 6. A1 语义缓存：查询嵌入只算一次 + top-k 结果复用 ----
+        print("== A1 语义缓存 ==")
+        db2 = tmp / "cache.db"
+
+        def fake_embed(texts):
+            return [[1.0, 0.0, 0.0]] * len(texts)
+
+        c_idx = SemanticIndex(db2)
+        c_idx.build(mem_root, embed_fn=fake_embed)
+        check(c_idx.gen() == 2, f"build 后 gen 换代=2（实得 {c_idx.gen()}）")
+        spy = {"n": 0}
+
+        def spy_embed(texts):
+            spy["n"] += 1
+            return [[1.0, 0.0, 0.0]] * len(texts)
+
+        v1 = c_idx.query_embed("缓存 查询", spy_embed)
+        v2 = c_idx.query_embed("缓存 查询", spy_embed)
+        check(spy["n"] == 1, f"同查询嵌入只算 1 次（实得 {spy['n']}）")
+        check(v1 == v2, "两次读取嵌入一致")
+        rc1 = c_idx.recall_cached("缓存 查询", v1, k=4)
+        rc2 = c_idx.recall_cached("缓存 查询", v2, k=4)
+        check(rc1 == rc2 and len(rc1) == 2, "top-k 缓存复用且条数=2")
+        n_qres = c_idx._conn.execute("SELECT COUNT(*) FROM qres").fetchone()[0]
+        check(n_qres == 1, f"qres 仅 1 行（实得 {n_qres}）")
+        c_idx.close()
+
     print("\nSEMANTIC (E2'):", "ALL PASS" if ok else "SOME FAILED")
     return ok
 

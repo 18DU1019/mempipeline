@@ -38,6 +38,21 @@ class AuditBackend(ABC):
         ...
 
 
+class NullAudit(AuditBackend):
+    """无审计后端时的静默实现：mark/trace 均不落库（写/跳与状态轨迹忽略）。
+
+    原在 bridge.py 与 panel.py 各存一份 duck 型副本，现合并为单一 AuditBackend 实现，
+    供两者复用，保证"无审计后端不崩溃"行为全程一致。
+    """
+
+    def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None) -> dict:
+        return {}
+
+    def trace(self, path: Path, from_state: str, to_state: str, reason: str,
+              source: str = "governance") -> dict:
+        return {}
+
+
 class FileAudit(AuditBackend):
     """基于文件的后端：log 只追加 + manifest.json 指纹登记（原子替换写）。
 

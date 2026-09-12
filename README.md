@@ -11,8 +11,10 @@ backend, and a staging ingest gate — with zero private paths baked in.
 mirror. Read-side capabilities live in this same repo — ngram TF-IDF recall
 (`recall.py`, with an optional SQLite inverted-index fast path), semantic
 hybrid retrieval (`semantic.py`), timeline graph (`timegrap.py`),
-bidirectional cross-referencing (`crossref.py`), and the PDCA Check signal
-layer (`recall_golden.py`). External distillation / control scripts live
+bidirectional cross-referencing (`crossref.py`), the PDCA Check signal
+layer (`recall_golden.py`), and a recall-degradation diagnosis & Act
+suggestion surface (`act.py`, human-triggered, Act off by default).
+External distillation / control scripts live
 under the runtime scripts dir (distill / sediment / audit_core).
 
 ## Model

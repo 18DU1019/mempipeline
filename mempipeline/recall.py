@@ -188,6 +188,14 @@ class TFIDFIndex:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        # schema 演进迁移（A3 ASI06）：旧版 DB 的 doc 表可能缺 ckey 列，
+        # CREATE TABLE IF NOT EXISTS 不会补列，导致 UNIQUE INDEX 建崩。
+        # 索引是可重算的派生数据，检测缺列即整体丢弃 doc/gram，下次 build() 全量重建（最稳）。
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(doc)")}
+        if cols and "ckey" not in cols:
+            self._conn.execute("DROP TABLE IF EXISTS doc")
+            self._conn.execute("DROP TABLE IF EXISTS gram")
+            self._conn.commit()
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS doc (path TEXT PRIMARY KEY,"
             " ckey TEXT, norm TEXT NOT NULL, ngrams TEXT NOT NULL)")

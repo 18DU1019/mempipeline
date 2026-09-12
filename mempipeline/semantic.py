@@ -52,20 +52,31 @@ def cos_sim(a: list[float], b: list[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
-def time_factor(path: str, now: float, half_life_days: int = 90) -> float:
-    """记忆时新度信号（C2）：按文件 mtime 的指数衰减 0..1，缺 mtime 返回中性 0.5。
+def time_factor(path: str, now: float, half_life_days: int = 90,
+                strategy: str = "exponential") -> float:
+    """记忆时新度信号（C2/D1）：按文件 mtime 衰减 0..1，缺 mtime 返回中性 0.5。
 
     对齐 act.advise_retention 的半衰期口径（默认 90 天，与 timegrap 断更阈值一致），
     使「检索时效」与「去留效用」使用同一时间语义。该因子是可选信号：
     hybrid_recall(time_weight>0) 时以 ``score *= factor ** time_weight`` 注入排序，
     time_weight=0 时恒等于 1（完全保持现状，黄金护栏兜底）。
+
+    D1 可选策略（对齐 Mem0 Memory Decay / SYNAPSE 时间衰减方向）：
+      - exponential（默认，现状）：0.5 ** (days/half_life)，time_weight=0 时完全等价旧版；
+      - linear：1 - days/(2*half_life)，2 倍半衰期归零（更早淘汰很旧稿）。
+    二者在半衰期处等值（linear 先缓后急、exponential 先急后缓）。
+    不引入未核实论文的 Weibull 形式（SSGM 原文待核，避免宣称为其等价物）。
+    非法 strategy 回落 exponential。
     """
     try:
         m = Path(path).stat().st_mtime
     except Exception:
         return 0.5
     days = max(0.0, (now - m) / 86400.0)
-    return 0.5 ** (days / max(1, half_life_days))
+    hl = max(1, half_life_days)
+    if strategy == "linear":
+        return max(0.0, 1.0 - days / (2.0 * hl))
+    return 0.5 ** (days / hl)  # exponential（默认，与 C2 原实现一致）
 
 
 def rrf_fuse(ranked_lists: list[list[str]], k: int = 60) -> list[tuple[str, float]]:
@@ -240,11 +251,14 @@ def hybrid_recall(query: str, k: int = 8, mem_root: Path | None = None,
                   embed_fn: EmbedFn | None = None,
                   memory: MemoryRecall | None = None,
                   time_weight: float = 0.0,
-                  decay_half_life_days: int = 90) -> list[tuple[str, float]]:
+                  decay_half_life_days: int = 90,
+                  decay_strategy: str = "exponential") -> list[tuple[str, float]]:
     """lexical(TF-IDF) + semantic(bge-m3) 双路 RRF 融合召回。
 
     - index 缺省 → 纯 TF-IDF 路径（语义不可用时自动回落，可逆）
     - memory 可注入现成实例（复用同义归一配置），缺省按参数新建
+    - time_weight/decay_*（D1）：time_weight>0 时按策略时新度加权排序；
+      time_weight=0（默认）恒等于不引入，完全保持现状（黄金护栏兜底）
     - 返回 [(path, fused_score)]，降序
     """
     embed_fn = embed_fn or embed
@@ -261,12 +275,13 @@ def hybrid_recall(query: str, k: int = 8, mem_root: Path | None = None,
     sem = [p for p, _ in index.recall_cached(query, qvec, k * 3, projects=projects)]
     fused = rrf_fuse([lex, sem])[:k]
     if time_weight and time_weight > 0:
-        # C2：给融合分注入时新度衰减（0..1 因子指数加权），time_weight 越大越偏好近期稿。
-        # 默认 0 → 跳过，输出与未引入完全一致（黄金护栏兜底，不拉低 recall）。
+        # C2/D1：给融合分注入时新度衰减（0..1 因子按策略指数加权），
+        # time_weight 越大越偏好近期稿。默认 0 → 跳过，输出与未引入完全一致。
         w = min(1.0, max(0.0, time_weight))
         now = time.time()
         fused = sorted(
-            ((p, s * (time_factor(p, now, decay_half_life_days) ** w))
+            ((p, s * (time_factor(p, now, decay_half_life_days,
+                                  strategy=decay_strategy) ** w))
              for p, s in fused),
             key=lambda kv: -kv[1])
     return fused

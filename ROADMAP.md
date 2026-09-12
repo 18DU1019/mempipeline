@@ -92,7 +92,7 @@
 - 需标注的存疑/二手：Stability/Safety Governed Memory（arXiv:2603.11768）摘要未见 "Weibull" 字样，**Weibull 衰减形式原文待核**，本轮不据此设计；Claude Aug'25 记忆统一为二手。
 
 **推荐 D 段（写作/观测侧，低风险纯增量，golden 兜底）**
-- **D1 时效衰减策略可选化**：把 C2 单一指数半衰期升级为可配置多策略（exponential / linear / weibull），默认保持 `time_weight=0` 现状，golden 回归红线拦截掉 recall。对齐 Mem0 Memory Decay / SYNAPSE。低风险可逆。
+- **D1 时效衰减策略可选化**：把 C2 单一指数半衰期升级为可配置多策略（`exponential` 现状 / `linear` 两倍半衰期归零），默认保持 `time_weight=0` 现状，golden 回归红线拦截掉 recall。对齐 Mem0 Memory Decay / SYNAPSE。低风险可逆。不引入未核实论文的 Weibull 形式（SSGM 原文待核）。
 - **D2 遗忘即评测（Forgetting-as-eval）**：在周检 signal 落盘位新增 forget-quality 时间序列（过时复用率=C3 stale_reuse/total、重复去重率 via ckey、golden 命中率趋势），独立一列供跨轮次观测，纯观测零状态，喂给 Act 建议面。对齐 Memora-FAMA / ForgetEval。把 ROADMAP「验证信号」悬空项由"跨轮次积累样本"落地为量化指标。
 - **D3 软失效状态显式化**：把 timegrap valid_to 推导的过时旧稿映射为候选 `superseded` 提示（只出状态建议、不改写文件），与 scan_stale_notes / P3-③ 同构；软删除/零删除对齐 Mem0 ADD-only + Claude 审计可回滚。
 

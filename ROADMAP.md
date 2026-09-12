@@ -84,6 +84,16 @@
 
 验收：`test_evolution.py` 覆盖三类（时新度单调性/排序、过时复用检测、缺词聚合），全套件回归绿。边界遵守：C2 默认关（time_weight=0）可逆；C3/C4 纯只读、Act 默认关铁律不变。
 
+### P3.7 检索时效/遗忘质量（D1+D2，2026-09-12 落地推送，D2 已跨仓接线）
+
+| 编号 | 内容 | 落点 |
+|------|------|------|
+| D1 | `time_factor` 多策略（exponential 现状 / linear 两倍半衰期归零），`hybrid_recall(decay_strategy=...)`，`time_weight=0` 默认现状。**不做 weibull**（SSGM 原文待核，避免宣称为其等价物） | `mempipeline/semantic.py` |
+| D2 | `recall_golden.forget_quality()` 遗忘质量快照（totals/retrieval/composite 稳定 schema，纯只读零状态），落地 Forgetting-as-eval 时间序列，喂周检 | `mempipeline/recall_golden.py` |
+| D2-线 | 脚本仓 `weekly_health.py` 新增 `forget_quality_signal()` 采样，写入 SIGNAL_LOG 落盘位 + 报告⑨/--signal-stats 呈现（真实镜像冒烟 composite=1.0 / stale_reuse=0 / 234 篇·67 过时） | `_agent运行台\脚本\weekly_health.py`（9025d74） |
+
+验收：`test_evolution.py` D1/D2 段（linear 越半衰更强淘汰、半衰期等值、非法策略回落；forget_quality schema 与 stale_reuse_rate 升降）全过；全套件回归绿。mempipeline 仓 push master 至 `8f6635c`。
+
 ### ∮ 下一阶段候选演进（对照 2025–26 前沿·最新复核，拟议待裁决）
 
 来源（一手为主；2026-06 联网复核）：
@@ -92,16 +102,16 @@
 - 需标注的存疑/二手：Stability/Safety Governed Memory（arXiv:2603.11768）摘要未见 "Weibull" 字样，**Weibull 衰减形式原文待核**，本轮不据此设计；Claude Aug'25 记忆统一为二手。
 
 **推荐 D 段（写作/观测侧，低风险纯增量，golden 兜底）**
-- **D1 时效衰减策略可选化**：把 C2 单一指数半衰期升级为可配置多策略（`exponential` 现状 / `linear` 两倍半衰期归零），默认保持 `time_weight=0` 现状，golden 回归红线拦截掉 recall。对齐 Mem0 Memory Decay / SYNAPSE。低风险可逆。不引入未核实论文的 Weibull 形式（SSGM 原文待核）。
-- **D2 遗忘即评测（Forgetting-as-eval）**：在周检 signal 落盘位新增 forget-quality 时间序列（过时复用率=C3 stale_reuse/total、重复去重率 via ckey、golden 命中率趋势），独立一列供跨轮次观测，纯观测零状态，喂给 Act 建议面。对齐 Memora-FAMA / ForgetEval。把 ROADMAP「验证信号」悬空项由"跨轮次积累样本"落地为量化指标。
-- **D3 软失效状态显式化**：把 timegrap valid_to 推导的过时旧稿映射为候选 `superseded` 提示（只出状态建议、不改写文件），与 scan_stale_notes / P3-③ 同构；软删除/零删除对齐 Mem0 ADD-only + Claude 审计可回滚。
+- ~~**D1 时效衰减策略可选化**~~ `[x]`：`time_weight=0` 默认现状，golden 兜底；已落地 P3.7。
+- ~~**D2 遗忘即评测（Forgetting-as-eval）**~~ `[x]`：forget-quality 时间序列已接入周检落盘位，悬空「验证信号」落地为量化指标；已落地 P3.7。
+- **D3 软失效状态显式化** `[ ]`：把 timegrap valid_to 推导的过时旧稿映射为候选 `superseded` 提示（只出状态建议、不改写文件），与 scan_stale_notes / P3-③ 同构；软删除/零删除对齐 Mem0 ADD-only + Claude 审计可回滚。
 
 **回收长线（需裁决打破当前约束，不推荐本轮）**
 - C1 Agentic 双向链接（写侧入库检索历史并回写）：写路径引入 agentic 循环，**违背「LLM 任务 stateless、无执行循环」硬约束**。
 - MaRS 差分隐私遗忘（(ε,δ)-DP）：单人本地单用户场景隐私收益有限。
 - MindMemOS 自我进化 schema / EDUD 事件级记忆：需 LLM 自我 schema 演化或大变构，冲击现有 project token 主题键，高风险。
 
-**推荐组合（下一轮裁决范围）**：D1 + D2（时效策略 + 遗忘质量观测，纯增量、零状态、golden 兜底）；D3 与 P3-③ 重叠故并入 D2 一并观测。C1/MaRS-DP/MindMemOS 归档长线。
+**推荐组合（下一轮裁决范围）**：D1/D2 已落地；**D3（软失效状态显式化）** 为下一候选，与 P3-③ 重叠，可并入 D2 观测序列一起推进。C1/MaRS-DP/MindMemOS 归档长线。
 
 ---
 生成：ROADMAP v0.2（2026-09-12 联网复核并规划 D 段）。拟议阶段非既定计划。

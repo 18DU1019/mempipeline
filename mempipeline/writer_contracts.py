@@ -85,7 +85,7 @@ def check_contract(text: str, *, stem: str | None = None) -> list[str]:
     writer = writer_of(text)
     if not writer:
         violations.append("writer_id 缺失")
-    contract = WRITER_CONTRACTS.get(writer or "", _DEFAULT)
+    contract = WRITER_CONTRACTS.get(writer or "", dict(_DEFAULT))
 
     tier = _field_value(fm, "memory_tier")
     if tier and contract["allowed_tiers"]:

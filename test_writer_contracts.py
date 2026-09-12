@@ -78,6 +78,15 @@ def main() -> bool:
     no_wid = _fm("distill_memory", "long", "项目约束-x", "x").replace("writer_id: distill_memory\n", "")
     v = check_contract(no_wid, stem="项目约束-x")
     check(any(x == "writer_id 缺失" for x in v), f"缺 writer_id 报违规（{v}）")
+    # 未知写者（未登记）带 writer_id + 合法层 → 兜底不误报（_DEFAULT allowed_tiers 空）
+    alien = _fm("some_future_writer", "medium", "项目会话-y", "y").replace(
+        "project_id: y\n", "")
+    v = check_contract(alien, stem="项目会话-y")
+    check(not any("memory_tier" in x for x in v) and v == [],
+          f"未登记写者兜底不误报（{v}）")
+    # 无 frontmatter → 明确报缺
+    v = check_contract("纯正文，无 frontmatter 块\n", stem="项目约束-z")
+    check(v == ["frontmatter 缺失"], f"无 frontmatter 报缺（{v}）")
 
     # ---- 2. non_governable_writers ----
     print("== non_governable_writers ==")

@@ -31,14 +31,15 @@
 - 项目隔离（projects=[...]）
 - 验收：test_timegrap.py 6 段（聚簇 / 脉络 / 信号 / 回落 / 隔离 / 阈值）
 
-### P3 自我进化闭环 `[2/3]`（③① 已立项落地，②待裁决）
-候选方向（需人工裁决后再推进）：
+### P3 自我进化闭环 `[3/3]`（③①② 均已立项落地）
+候选方向（已全部开工并落地）：
 - **golden set 扩充 + 召回回归门槛 `[x]`**：GOLDEN 从 4 条扩为覆盖「长期+中期」两层的全层级回归基线（`mempipeline/recall_golden.py`，10 条），周检门禁 `weekly_health.golden_regress()` 自动取用；全量锚点取库内真实笔记，本批命中率 1.000。
   - 验收：真实镜像 check() 全层级命中率 1.000 > 红线 2/3；test_mempipeline.py RECALL GOLDEN 段（注入沙盒集）仍绿；旧版 `_test_recall_golden.py` SMOKE 8/8。
-- Act 仍人类触发：改 synonyms / 停用字 / 阈值，写回仍走 write_atomic + 审计；系统只显影「退化在哪、该看哪里」，不自动改参。`[ ]` 拟议
+- **Act 仍人类触发 `[x]`**：新增 `mempipeline/act.py`——召回退化诊断与 Act 建议面。对 golden 未命中，把查询拆到主词空间 term，逐 term 对照期望笔记，定位缺词并分档三杠杆：synonym（缺专用词）/ stopword（全库通用词缺区分度）/ threshold（已获分未进 top-k）。**只显影、只建议，不自动改参、不写库**；人类采纳后的写回仍走调用方 write_atomic + 审计。
+  - 验收：test_act.py 11/11（synonym/stopword/threshold/never_scored/trace_recall）。
 - **时间图谱信号使入治理 `[x]`**：把 timegrap 的断更(revived) / 结论漂移(drift) 信号作为候选源喂给 P1 候选清单（`scan_stale_notes(..., timeline=...)`），仍不自动改状态。
   - 验收：test_governance.py 第 8 段（drift→re-review、revived→review、扫描后 4 篇仍 active）。
-- 验证信号（草案，落地时定稿）：召回回归命中率、候选清单误报率、跨轮次脉络连续性。`[ ]` 待 P3 ②立项后定稿
+- 验证信号（草案，落地时定稿）：召回回归命中率、候选清单误报率、跨轮次脉络连续性。`[ ]` 待跨轮次运行后积累样本再定稿
 - 边界（铁律）：Act 默认关；重引擎不入；不新增第二套度量。
 
 ## 非目标 / 硬边界

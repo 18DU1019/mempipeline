@@ -247,12 +247,15 @@ def scan_stale_notes(mem_root: Path, tiers: Iterable[str] | None = None,
 
 
 def _timeline_signal_candidates(timeline: dict) -> list[dict]:
-    """把 timegrap 时间图谱的断更/结论漂移信号转成候选条目（只读，不改状态）。
+    """把 timegrap 时间图谱的断更/结论漂移/过时旧稿信号转成候选条目（只读，不改状态）。
 
     - relation == "drift"：相邻两稿摘要相似度低于阈值 → 结论漂移 → re-review
     - flag == "revived"：断更 gap 后再次投稿 → 复活 → review（结论需再校验）
+    - valid_to 非空（D3）：该稿已被同主题后续稿正式取代 → 软失效提示 superseded
+      （只出候选、不改写文件，对齐 Mem0 ADD-only / Claude 审计可回滚的"零删除"取态）
     """
     out: list[dict] = []
+    emitted: set[str] = set()
     for subject, tl in (timeline or {}).items():
         for sig in getattr(tl, "signals", []) or []:
             path = sig.get("path")
@@ -279,6 +282,7 @@ def _timeline_signal_candidates(timeline: dict) -> list[dict]:
                     "signal": "revived",
                     "signal_detail": detail,
                 })
+                emitted.add(path)
             elif sig.get("relation") == "drift":
                 out.append({
                     "path": path, "subject": subject,
@@ -291,6 +295,31 @@ def _timeline_signal_candidates(timeline: dict) -> list[dict]:
                                       f"{sig.get('sim_prev', '?')} < 阈值 "
                                       f"{sig.get('drift_threshold', '?')}"),
                 })
+                emitted.add(path)
+        # D3：过时旧稿（valid_from/valid_to 编码，valid_to 非空 = 已被同主题后续稿取代）
+        for w in tl.valid_windows():
+            if w.get("valid_to") is None or w.get("path") in emitted:
+                continue
+            path = w["path"]
+            node = next((n for n in tl.nodes if n.path == path), None)
+            imp = node.importance if node else 0.6
+            days = 0
+            vt = w.get("valid_to")
+            if vt:
+                try:
+                    days = max(0, (datetime.now() - datetime.fromisoformat(vt)).days)
+                except (ValueError, TypeError):
+                    days = 0
+            out.append({
+                "path": path, "subject": subject,
+                "status": node.status if node else "active",
+                "stale_days": days,
+                "score": round(score_note(importance=imp, days_since_active=days), 3),
+                "suggestion": "supersede",
+                "signal": "superseded",
+                "signal_detail": f"过时旧稿：已被同主题后续稿取代（valid_to={vt}）",
+            })
+            emitted.add(path)
     return out
 
 

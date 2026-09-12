@@ -163,3 +163,41 @@ def advise_retention(importance: float, stale_days: int,
         "reason": reason,
         "advisory": True,
     }
+
+
+def summarize_cards(cards: list[dict], top_n: int = 5) -> dict:
+    """跨 query 聚合 Act 卡（C4）：把多次 golden 未命中的缺词证据聚成策略级建议。
+
+    输入为一组 diagnose_miss / trace_recall 产出的 Act 卡（各含 levers 与 absent_terms）。
+    只读聚合：统计三档杠杆（synonym / stopword / threshold）命中次数，汇总全量缺词
+    词频，抽出最高频缺词 top-N 作为「候选新增 synonyms 映射」的优先锚点。仍只建议、
+    绝不自动改参（遵守 Act 默认关铁律），advisory 恒真。
+
+    可作为信号样本盘（weekly_health 落盘）的检索侧证据面：跨轮次收敛「该加哪个同义词」
+    ——归还于人类的 Check→Act 决策，不替代之。
+    """
+    lever_count: Counter = Counter()
+    term_count: Counter = Counter()
+    for card in cards:
+        for lv in card.get("levers", []):
+            lever_count[lv] += 1
+        for at in card.get("absent_terms", []):
+            term_count[at["term"]] += 1
+    top = [{"term": t, "times": c} for t, c in term_count.most_common(top_n)]
+    parts: list[str] = []
+    if lever_count:
+        order = [lv for lv in ("synonym", "stopword", "threshold")
+                 if lever_count.get(lv)]
+        parts.append("优先级：" + " > ".join(
+            f"{lv}({lever_count[lv]})" for lv in order))
+    if top:
+        parts.append("最高频缺词（候选 synonyms 锚点）："
+                     + "、".join(f"{t['term']}×{t['times']}" for t in top))
+    else:
+        parts.append("无缺词证据，多为 threshold 层")
+    return {
+        "levers": dict(lever_count),
+        "top_absent_terms": top,
+        "suggestion": "；".join(parts),
+        "advisory": True,
+    }

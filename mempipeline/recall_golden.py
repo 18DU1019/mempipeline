@@ -47,39 +47,71 @@ GOLDEN: dict[str, str] = {
 MIN_HIT_RATE = 2 / 3
 
 
+def build_stale_map(mem_root: Path) -> set[str]:
+    """由 timegrap 推导「过时旧稿」path 集（C3，FAMA 式过时复用判据）。
+
+    对每条时间脉络，取 valid_windows()（B4）：valid_to 非 None 的稿即「已被同主题
+    后续稿取代的旧稿」，命中它们视为过时复用。返回 path 绝对集，供 check(stale_paths=)
+    注入。纯只读，复用现有 timegrap 推导，零新增度量。
+    """
+    from .timegrap import build_timeline
+    stale: set[str] = set()
+    for tl in build_timeline(mem_root).values():
+        for w in tl.valid_windows():
+            if w["valid_to"] is not None:
+                stale.add(w["path"])
+    return stale
+
+
 def check(mem_root: Path, tiers: Iterable[str] | None = None,
           synonyms: dict[str, list[str]] | None = None,
           min_hit: float = MIN_HIT_RATE,
-          golden: dict[str, str] | None = None) -> dict:
+          golden: dict[str, str] | None = None,
+          stale_paths: set[str] | None = None) -> dict:
     """Check 相：对 golden 集逐条召回并按期望子串判定命中。
 
     只读不写。返回结构化信号：逐条结果、整体命中率、是否跌破红线，以及
     「建议 Act 面」提示。Act 本身留给人类，不做任何自动参数修改。
 
+    stale_paths（C3，可选）：注入过时旧稿 path 集（build_stale_map 产出）。
+    命中笔记落在其中 → 该条标记 stale_reuse（FAMA 式「过时记忆复用」），并抑制
+    整体 freshness 指标。缺省 None 时完全不计 stale（行为同旧版，greenline 不受影响）。
+
     golden：待检验的 query->expect 映射；缺省用模块级 GOLDEN 常量。
     测试需注入自有沙盒 golden 集（避免测试依赖全局常量导致 GOLDEN 改后测试崩）。
     """
     golden = golden if golden is not None else GOLDEN
+    stale_paths = stale_paths or set()
     recaller = MemoryRecall(mem_root, tiers=tiers, synonyms=synonyms or {})
     results: list[dict] = []
     for query, expect in golden.items():
         hits = recaller.recall(query, k=5)
         hit_names = [Path(p).stem for p, _ in hits]
-        hit = any(expect in n for n in hit_names)
+        idx = next((i for i, (p, _) in enumerate(hits)
+                    if expect in Path(p).stem), None)
+        hit = idx is not None
+        hit_path = hits[idx][0] if hit else None
+        stale_reuse = bool(hit and hit_path in stale_paths)
         results.append({
             "query": query,
             "expect": expect,
             "hit": hit,
             "phase": "hit" if hit else "miss",
             "top_hits": hit_names,
+            "hit_path": hit_path,
+            "stale_reuse": stale_reuse,
         })
     misses = [r for r in results if not r["hit"]]
+    stale_reuse_count = sum(1 for r in results if r["stale_reuse"])
     hit_rate = (len(results) - len(misses)) / len(results) if results else 0.0
+    freshness = hit_rate * (1.0 - stale_reuse_count / len(results)) if results else 0.0
     return {
         "phase": "check",
         "hit_rate": hit_rate,
         "min_hit": min_hit,
         "passed": hit_rate >= min_hit,
+        "stale_reuse": stale_reuse_count,
+        "freshness": round(freshness, 3),
         "results": results,
         "suggested_act": _suggest(len(misses)),
     }

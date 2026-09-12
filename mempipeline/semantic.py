@@ -16,6 +16,7 @@ import hashlib
 import json
 import math
 import sqlite3
+import time
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -49,6 +50,22 @@ def cos_sim(a: list[float], b: list[float]) -> float:
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     return dot / (na * nb) if na and nb else 0.0
+
+
+def time_factor(path: str, now: float, half_life_days: int = 90) -> float:
+    """记忆时新度信号（C2）：按文件 mtime 的指数衰减 0..1，缺 mtime 返回中性 0.5。
+
+    对齐 act.advise_retention 的半衰期口径（默认 90 天，与 timegrap 断更阈值一致），
+    使「检索时效」与「去留效用」使用同一时间语义。该因子是可选信号：
+    hybrid_recall(time_weight>0) 时以 ``score *= factor ** time_weight`` 注入排序，
+    time_weight=0 时恒等于 1（完全保持现状，黄金护栏兜底）。
+    """
+    try:
+        m = Path(path).stat().st_mtime
+    except Exception:
+        return 0.5
+    days = max(0.0, (now - m) / 86400.0)
+    return 0.5 ** (days / max(1, half_life_days))
 
 
 def rrf_fuse(ranked_lists: list[list[str]], k: int = 60) -> list[tuple[str, float]]:
@@ -221,7 +238,9 @@ def hybrid_recall(query: str, k: int = 8, mem_root: Path | None = None,
                   tiers: Iterable[str] | None = None,
                   projects: Iterable[str] | None = None,
                   embed_fn: EmbedFn | None = None,
-                  memory: MemoryRecall | None = None) -> list[tuple[str, float]]:
+                  memory: MemoryRecall | None = None,
+                  time_weight: float = 0.0,
+                  decay_half_life_days: int = 90) -> list[tuple[str, float]]:
     """lexical(TF-IDF) + semantic(bge-m3) 双路 RRF 融合召回。
 
     - index 缺省 → 纯 TF-IDF 路径（语义不可用时自动回落，可逆）
@@ -240,4 +259,14 @@ def hybrid_recall(query: str, k: int = 8, mem_root: Path | None = None,
     except Exception:
         return [(p, 1.0 / (i + 1)) for i, p in enumerate(lex[:k])]  # 语义失败回落
     sem = [p for p, _ in index.recall_cached(query, qvec, k * 3, projects=projects)]
-    return rrf_fuse([lex, sem])[:k]
+    fused = rrf_fuse([lex, sem])[:k]
+    if time_weight and time_weight > 0:
+        # C2：给融合分注入时新度衰减（0..1 因子指数加权），time_weight 越大越偏好近期稿。
+        # 默认 0 → 跳过，输出与未引入完全一致（黄金护栏兜底，不拉低 recall）。
+        w = min(1.0, max(0.0, time_weight))
+        now = time.time()
+        fused = sorted(
+            ((p, s * (time_factor(p, now, decay_half_life_days) ** w))
+             for p, s in fused),
+            key=lambda kv: -kv[1])
+    return fused

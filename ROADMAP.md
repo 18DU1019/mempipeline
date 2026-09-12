@@ -73,22 +73,35 @@
 
 七套测试全绿（act/bridge/governance/mempipeline/panel/semantic/timegrap）后 push master 至 `6718a70`。
 
-### ∮ 下一阶段候选演进（对照 2025–26 前沿，拟议待裁决）
+### P3.6 检索时效与过时感知（C2/C3/C4，2026-09-12 全做）
 
-来源（一手为主，标注）：A-MEM/Zettelkasten 双向回溯链接（NeurIPS'25 arXiv:2502.12110）；Episodic Memory（arXiv:2502.06975）；Mem0（arXiv:2504.19413）；RMM 反思式记忆管理 Prospective/Retrospective（ACL'25 2025.acl-long.413）；Memora 过时复用惩罚指标 FAMA + Forgetting 评测（arXiv:2604.20006）；MaRS 六遗忘策略与 (ε,δ)-DP（arXiv:2512.12856）；Stability/Safety Governed Memory 时序衰减 Weibull 与治理（arXiv:2603.11768）；SYNAPSE 三重混合检索+时间衰减（arXiv:2601.02744）。以上为 2025-12 至 2026-05 一手论文；检索效率/健康类（Mem0）为业界工程二手，标注推测属性。
+把上一轮 ∮ 的"检索时效系"候选全部落地（本轮实现，提交待闭环）：
+| 编号 | 内容 | 落点 |
+|------|------|------|
+| C2 | 时新度信号进 RRF 排序：`time_factor`（mtime 指数衰减 0..1）+ `hybrid_recall(time_weight=..., decay_half_life_days=...)`，默认 `time_weight=0` 保持现状 | `mempipeline/semantic.py` |
+| C3 | FAMA 式过时复用检测：`build_stale_map`（timegrap valid_to 推导过时旧稿集）+ `check(stale_paths=)` 标 `stale_reuse` 抑制 `freshness`，缺省不计 stale 不改 greenline | `mempipeline/recall_golden.py` |
+| C4 | Act 跨 query 缺词聚合建议面：`summarize_cards` 汇总三档杠杆命中数与高频缺词，只建议不落库 | `mempipeline/act.py` |
 
-**写作/检索侧候选（低风险纯增量，复用现有架构，golden 护栏兜底）**
-- **C2 时间/脉络信号进 RRF 排序**：融合加时新度加权（复用 valid_from/to 时效窗）+ 项目脉络共识度，对齐 SYNAPSE 时间衰减。风险：可能拉低 recall，需 golden 回归红线。
-- **C3 过时记忆复用检测（FAMA 式）**：把"复用 valid_to 已覆盖的旧稿"计为惩罚项接入 golden 回归，产出时序新鲜度指标；复用现有 timegrap valid_from/to + 观测样本盘。纯观测零状态。
-- **C4 引用信号增强 Act 建议面**：把周检 golden 未命中 + 信号样本盘累积证据喂给 act 诊断（Retrospective 方向），仍只建议、**不自动改参**（遵守 Act 默认关铁律）。
+验收：`test_evolution.py` 覆盖三类（时新度单调性/排序、过时复用检测、缺词聚合），全套件回归绿。边界遵守：C2 默认关（time_weight=0）可逆；C3/C4 纯只读、Act 默认关铁律不变。
 
-**架构侧候选（需裁决打破当前约束，暂不推荐本轮）**
-- C1 Agentic 双向链接（写侧入库检索历史并回写）：收益联想召回，代价是写路径引入 agentic 循环，**违背「LLM 任务 stateless business call、无执行循环」硬约束**。
-- C6 事件级 EDU 记忆表示（EMem）：大变构，冲击现有 project token 主题键，高风险。
-- C5 隐私/敏感分级 + 动态访问控制（MaRS DP / SSGM）：单用户本地优先场景价值有限。
-- C7 遗忘策略形式化（MaRS 六策略）：可视化为策略选择，可与 C2/C3 合并。
+### ∮ 下一阶段候选演进（对照 2025–26 前沿·最新复核，拟议待裁决）
 
-**推荐组合（下一轮裁决范围）**：C2 + C3（检索时效 + 过时复用检测，纯增量）；C4 作为 Act 建议面增强；C1/C5/C6 归档长线。
+来源（一手为主；2026-06 联网复核）：
+- 存量已验证真实：A-MEM 双向回溯（NeurIPS'25 arXiv:2502.12110）；Episodic Memory 五性质（arXiv:2502.06975）；Mem0 ADD/UPDATE/DELETE/NOOP（ECAI'25 arXiv:2504.19413）；RMM Prospective/Retrospective（ACL'25 2025.acl-long.413）；MaRS 六遗忘策略+(ε,δ)-DP（arXiv:2512.12856）；SYNAPSE 三重混合检索+时间衰减（ACL'26 arXiv:2601.02744）。
+- 2026 新增强势相关：Mem0 2026-04 改单次 ADD-only+分层检索，05 新增 **Temporal Reasoning + Memory Decay**（LoCoMo 92.5/LongMemEval 94.4，一手 mem0.ai）；Anthropic 2025-09 /tools/memory、2026-03 Chat Memory 全量开放、2026-04 **Managed Agents 版本化文件式记忆+审计日志+回滚+内容脱敏**（一手，与 mempipeline 审计架构同构）；评测系 **Memora-FAMA**（arXiv:2604.20006）、**ForgetEval**（arXiv:2606.15903）、**MemTier**（arXiv:2605.03675）；模型/自我进化系 ActiveMem（2606.10532）、AgeMem-RL（2601.01885）、MindMemOS（2608.12428）。
+- 需标注的存疑/二手：Stability/Safety Governed Memory（arXiv:2603.11768）摘要未见 "Weibull" 字样，**Weibull 衰减形式原文待核**，本轮不据此设计；Claude Aug'25 记忆统一为二手。
+
+**推荐 D 段（写作/观测侧，低风险纯增量，golden 兜底）**
+- **D1 时效衰减策略可选化**：把 C2 单一指数半衰期升级为可配置多策略（exponential / linear / weibull），默认保持 `time_weight=0` 现状，golden 回归红线拦截掉 recall。对齐 Mem0 Memory Decay / SYNAPSE。低风险可逆。
+- **D2 遗忘即评测（Forgetting-as-eval）**：在周检 signal 落盘位新增 forget-quality 时间序列（过时复用率=C3 stale_reuse/total、重复去重率 via ckey、golden 命中率趋势），独立一列供跨轮次观测，纯观测零状态，喂给 Act 建议面。对齐 Memora-FAMA / ForgetEval。把 ROADMAP「验证信号」悬空项由"跨轮次积累样本"落地为量化指标。
+- **D3 软失效状态显式化**：把 timegrap valid_to 推导的过时旧稿映射为候选 `superseded` 提示（只出状态建议、不改写文件），与 scan_stale_notes / P3-③ 同构；软删除/零删除对齐 Mem0 ADD-only + Claude 审计可回滚。
+
+**回收长线（需裁决打破当前约束，不推荐本轮）**
+- C1 Agentic 双向链接（写侧入库检索历史并回写）：写路径引入 agentic 循环，**违背「LLM 任务 stateless、无执行循环」硬约束**。
+- MaRS 差分隐私遗忘（(ε,δ)-DP）：单人本地单用户场景隐私收益有限。
+- MindMemOS 自我进化 schema / EDUD 事件级记忆：需 LLM 自我 schema 演化或大变构，冲击现有 project token 主题键，高风险。
+
+**推荐组合（下一轮裁决范围）**：D1 + D2（时效策略 + 遗忘质量观测，纯增量、零状态、golden 兜底）；D3 与 P3-③ 重叠故并入 D2 一并观测。C1/MaRS-DP/MindMemOS 归档长线。
 
 ---
-生成：ROADMAP v0.1；2026-09-01。拟议阶段非既定计划。
+生成：ROADMAP v0.2（2026-09-12 联网复核并规划 D 段）。拟议阶段非既定计划。

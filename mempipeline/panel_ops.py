@@ -85,6 +85,8 @@ def _browse(mem_root: Path, page: int = 1, limit: int = 50) -> dict:
         for d in scan_tier_dirs(mem_root, tier, None):
             for md in d.glob("*.md"):
                 fm = _read_frontmatter(md)
+                if fm.get("status") == "redacted":
+                    continue  # P3.12 §2.5 展示收敛：redacted 全程退出浏览列表
                 try:
                     mtime = md.stat().st_mtime
                 except Exception:

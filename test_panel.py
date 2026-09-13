@@ -126,6 +126,21 @@ def main() -> bool:
         b = get("/api/browse?page=1&limit=10")
         check(b["total"] >= 2 and len(b["rows"]) >= 2,
               f"browse 返回笔记（total={b['total']}, rows={len(b['rows'])}）")
+
+        # 7b. 展示收敛（P3.12 §2.5）：redacted 稿退出 /api/browse 列表，
+        #      但仍留存在 stats 的 by_status 观测位（治理刻意保留 redacted 计数）
+        n_red = Note(title="密钥", summary="敏感", tier="long", importance=0.9,
+                     body="sk_live_secret。", status="redacted")
+        red_path = mem_root / TIER_DIR["long"] / "密钥-r3.md"
+        write_atomic(red_path, n_red.to_frontmatter() + "\n\n" + n_red.body + "\n",
+                     audit)
+        b2 = get("/api/browse?page=1&limit=50")
+        red_paths = [r["path"] for r in b2["rows"]]
+        check(not any(str(red_path) in p for p in red_paths),
+              "browse 列表已剔除 redacted 稿（不外泄秘文稿）")
+        st3 = get("/api/stats")
+        check(st3["by_status"].get("redacted") == 1,
+              f"stats by_status 仍保留 redacted 观测位（{st3['by_status']}）")
         ista = get("/api/index_status")
         check(isinstance(ista, dict), "index_status 返回对象")
         try:

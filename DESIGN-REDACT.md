@@ -1,8 +1,8 @@
 # 记忆脱敏 / 红act 设计备忘
 
-> 版本 v1.1（2026-09-13，核心已落码回归绿） · 上游：对照研究 P3.12 候选
-> 状态：`implemented（核心部分）` —— 已落：软终态 + recall 两路检索切断 + timegrap 信号排除 + 软/硬脱敏 + 审计轨迹（commit 3ff5b76，全套件 7 passed）。
-> 未落（后续步）：§2.5 展示/导出收敛（panel/bridge 剔除 redacted）、§7·B qemb 语义缓存剔除。
+> 版本 v1.2（2026-09-13，核心+展示收敛已落码回归绿） · 上游：对照研究 P3.12 候选
+> 状态：`implemented（除缓存剔除外均已实现）` —— 已落：软终态 + recall 两路检索切断 + timegrap 信号排除 + 软/硬脱敏 + 审计轨迹（commit 3ff5b76）＋ 展示/导出收敛（panel /api/browse 剔除 redacted，commit 待建，见下）。
+> 未落（后续步）：§7·B qemb 语义缓存剔除。
 > 对齐语义：Claude Managed Agents 的 redact + 红act（官方一手）；与 mempipeline「零删除 + 本地闭环」硬约束兼容。
 
 ---
@@ -59,6 +59,9 @@
 ### 2.5 展示/导出收敛
 
 panel 与 bridge 对 `status: redacted` 一律不出现于任何列表/检索结果，对齐既有 `non_governable_writers` 的剔除模式（不新增机制，复用已有"按状态/属性过滤列表"路径）。
+
+- **已落**：panel `_browse`（/api/browse）对 `status: redacted` 稿 `continue` 剔出列表；bridge `export_promoted` 仅导 `status=promoted`，redacted 天然不导出；panel `_tfidf` 检索走 `MemoryRecall`（recall 层已过滤）。
+- **观测位刻意保留**：`collect_stats` 的 `by_status` 仍计入 redacted（治理报告需可见脱敏量，同 §4）。
 
 ---
 ## 3. 状态机边界
@@ -118,4 +121,4 @@ panel 与 bridge 对 `status: redacted` 一律不出现于任何列表/检索结
 - **语义嵌入缓存（RRF qemb/qres）**：若某 doc 索引过 qemb，redact 成终态是否需从缓存/索引剔除，落地时一并处理（对齐 2.3 的"重建索引"语义）。
 
 ---
-*已落码部分（commit 3ff5b76）以代码为准；未落码部分（§2.5 展示收敛、§7·B 缓存剔除）不构成实现承诺，落地以人工裁决并在 ROADMAP P3.12 更新为准。*
+*已落码部分（commit 3ff5b76 + 展示收敛提交）以代码为准；未落码部分（§7·B qemb 缓存剔除）不构成实现承诺，落地以人工裁决并在 ROADMAP P3.12 更新为准。*

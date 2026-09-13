@@ -404,6 +404,10 @@ class TimelineGraph:
         tl.nodes = nodes
         tl.signals = []
         for i, n in enumerate(nodes):
+            if n.status == "redacted":
+                # P3.12 §7.1：redacted 退出活跃信号源 —— 不作新 drift/revived/superseded
+                # 候选；节点保留在 nodes 供历史脉络回放（谱系完整可追溯），只不派生信号。
+                continue
             rec: dict = {"idx": i, "path": n.path, "time_src": n.time_src}
             # B4 时序边 valid-from/to：本条内容「何时生效、何时被下一稿取代」。
             # valid_from=本稿时间；valid_to=下一稿时间（末稿 None=仍现行），

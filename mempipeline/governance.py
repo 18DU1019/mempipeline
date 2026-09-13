@@ -23,17 +23,24 @@ from .audit import AuditBackend
 from .recall import scan_tier_dirs
 
 # --- 状态机定义 ---
-STATES = {"draft", "active", "project", "candidate", "promoted", "archived", "rejected"}
+# redacted（P3.12）：紧急撤离的**软终态**标记 —— 从活跃态人工单向迁入，迁出为空、
+# 系统永不自动触发。只脱离「检索/导出」活跃面，不删除文件（零删除）；审计保留
+# 轨迹（谁在何时脱敏了什么），不覆盖不删历史。
+REDACTED = "redacted"
+REDACTED_PLACEHOLDER = "【已脱敏 redacted】\n"
+STATES = {"draft", "active", "project", "candidate", "promoted", "archived",
+          "rejected", REDACTED}
 # vault 兼容映射：资产化导出时 promoted → active（vault 白名单为 active/draft/archived）
 VAULT_STATUS_MAP = {"promoted": "active", "draft": "draft", "archived": "archived"}
 VALID_TRANSITIONS = {
     "draft": {"project", "rejected"},          # 投稿过过滤 → 项目域 / 拒绝
-    "active": {"project", "candidate", "rejected"}, # Note 默认写入态，可入治理链
-    "project": {"candidate", "archived", "rejected"},  # AI 判别标记候选 / 归档 / 拒绝
-    "candidate": {"promoted", "rejected", "project"},  # 审核晋升全局 / 拒绝 / 退回项目
-    "promoted": {"archived", "rejected"},      # 低分衰减归档 / 人工下架
+    "active": {"project", "candidate", "rejected", REDACTED},  # Note 默认写入态，可入治理链
+    "project": {"candidate", "archived", "rejected", REDACTED},  # AI 判别标记候选 / 归档 / 拒绝
+    "candidate": {"promoted", "rejected", "project", REDACTED},  # 审核晋升全局 / 拒绝 / 退回项目
+    "promoted": {"archived", "rejected", REDACTED},  # 低分衰减归档 / 人工下架
     "archived": {"promoted"},                  # 归档可复活（零删除的逆向）
     "rejected": set(),                         # 终态（软标记，不删除）
+    REDACTED: set(),                           # 软终态：只入不迁出（不可复活）
 }
 
 # --- 过滤规则（DSP 白名单/黑名单）---
@@ -184,6 +191,58 @@ def transition(note_path: Path, to_state: str, audit: AuditBackend,
                     reason=f"auto:transition {cur}→{to_state} via {source}",
                     source=source)
     return st, cur
+
+
+def _stamp(now_iso: str | None) -> str:
+    """时间戳文件名片段（归档备份用）。"""
+    s = (now_iso or datetime.now().strftime("%Y%m%d-%H%M%S"))
+    return s.replace(" ", "").replace(":", "").replace("-", "")
+
+
+def _blot_body(text: str, placeholder: str = REDACTED_PLACEHOLDER) -> str:
+    """保留 frontmatter、把正文替换为占位符（硬脱敏内容处置）。"""
+    m = _FM_RE.match(text)
+    if not m:
+        return placeholder
+    return f"{m.group(0)}\n\n{placeholder}"
+
+
+def redact(note_path: Path, audit: AuditBackend, *, wipe: bool = False,
+           archive_dir: Path | None = None, source: str = "governance",
+           now_iso: str | None = None,
+           placeholder: str = REDACTED_PLACEHOLDER) -> tuple[str, str]:
+    """红act（P3.12）：三段式顺序，默认软脱敏。
+
+    1. **检索切断（先于标记）**：recall 全扫跳过 `status: redacted`、TFIDF `build()`
+       去掉 redacted 文档 —— 已编码在 recall.py 恒开，先于本动作存在，杜绝泄漏窗口。
+    2. **迁移标记**：`transition(note_path, REDACTED, ...)` 走幂等原子写 + 审计轨迹
+       （可回查谁在何时脱敏了哪条）。
+    3. **内容处置（可选、默认关）**：仅 `wipe=True` 且人工显式触发时执行硬脱敏 ——
+       先备份原稿到 git 外 `archive_dir`（防丢失底线），再抹正文为占位符并重写，
+       审计记新 hash（可证明正文已变更）。`transcribe` 需显式 `archive_dir`。
+
+    返回 (transition_status, from_state)。
+    """
+    st, frm = transition(note_path, REDACTED, audit, source=source, now_iso=now_iso)
+    if st not in ("wrote", "skipped"):
+        return st, frm  # 软标记失败（含已终态 → invalid_transition）即中止，不触碰内容
+    if not wipe:
+        return st, frm  # 软脱敏：只标记 + 检索/导出切断，正文保留（忠于审计取证）
+    if archive_dir is None:
+        raise ValueError("硬脱敏需显式 archive_dir（git 外归档区）")
+    try:
+        txt = note_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        return f"read_error:{exc}", frm
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    bak = archive_dir / f"{note_path.stem}-{_stamp(now_iso)}.md"
+    try:
+        bak.write_text(txt, encoding="utf-8")
+    except OSError as exc:
+        return f"backup_error:{exc}", frm
+    new_text = _blot_body(txt, placeholder)
+    st2, _ = write_atomic(note_path, new_text, audit, source=source + ":redact-wipe")
+    return st2, frm
 
 
 def review_queue(mem_root: Path, tiers: Iterable[str] | None = None,

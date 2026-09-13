@@ -241,6 +241,31 @@ def main() -> bool:
             check("数学上不可能触发" in "".join(tl6.unreachable_signals),
                   "标注含原因（非静默返回 0）")
 
+    # ---- 11. P3.12 §7.1 redacted 退出活跃信号源 / 保留谱系历史 ----
+    print("== P3.12 redacted 退出活跃信号源 ==")
+    with tempfile.TemporaryDirectory() as td7:
+        mem7 = Path(td7) / "mem"
+        (mem7 / "01-长期记忆").mkdir(parents=True)
+        _write(mem7 / "01-长期记忆" / "主体-旧.md",
+               "项目约束（6165c7）", "旧结论", days_ago=10)
+        # redacted 稿用字面 frontmatter（status 覆盖为 redacted）
+        red_path = mem7 / "01-长期记忆" / "主体-新.md"
+        red_text = (f'---\ntitle: "项目约束（6165c7）"\n'
+                    f'summary: "新结论"\nmemory_tier: "long"\n'
+                    f'importance: 0.9\nstatus: "redacted"\n'
+                    f'updated: "{_iso(0)}"\n---\n\n正文。\n')
+        red_path.write_text(red_text, encoding="utf-8")
+        tl7 = build_timeline(mem7).get(subject_key("项目约束（6165c7）"))
+        check(tl7 is not None and len(tl7.nodes) == 2,
+              "redacted 稿仍在脉络节点（谱系历史保留）")
+        check(str(red_path) in tl7.recall() if tl7 else False,
+              "redacted 稿仍在历史脉络回放中占位")
+        if tl7 is not None:
+            check(str(red_path) not in {s.get("path") for s in tl7.signals},
+                  "redacted 稿不派生任何信号（退出活跃信号源）")
+            check(str(red_path) not in [w.get("path") for w in tl7.valid_windows()],
+                  "redacted 稿不进 valid_windows（不作 superseded/drift 候选）")
+
     # ---- (bonus) summary_similarity 阈值边界 ----
     print("== 相似度阈值 ==")
     check(summary_similarity("出餐口到餐桌要短", "出餐口到餐桌要短") >= DUP_THRESHOLD,

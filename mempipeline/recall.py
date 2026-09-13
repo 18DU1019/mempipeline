@@ -30,6 +30,21 @@ class RecallBackend(ABC):
 _STOPCHARS = frozenset("的了在是我你他她它与和及或对为从到个着都很也就而并且这那有其该被把让向于以不会能要已等还又再")
 
 
+def is_redacted(text: str) -> bool:
+    """判读一条笔记 frontmatter `status` 是否为 redacted（P3.12 检索切断）。
+
+    红act 的软终态标记；命中即从「活跃可检索」面剔除。无 frontmatter /
+    status 非 redacted 一律返回 False（不误伤存量笔记）。
+    """
+    m = re.match(r"^---\s*\n(.*?)\n---", text, re.S)
+    if not m:
+        return False
+    mm = re.search(r"(?m)^\s*status:\s*(.+)$", m.group(1))
+    if not mm:
+        return False
+    return mm.group(1).strip().strip("\"'") == "redacted"
+
+
 def _tokens(text: str) -> list[str]:
     """字符 ngram（2-4 字），剔除全由停用字构成的窗口。零分词依赖。
 
@@ -155,6 +170,8 @@ class MemoryRecall(RecallBackend):
                         txt = md.read_text(encoding="utf-8")
                     except Exception:
                         continue
+                    if is_redacted(txt):
+                        continue  # P3.12 红act：不进候选、不打分、不进 Top-K
                     docs.append((str(md), self._norm_doc(txt)))
         idf = build_idf([t for _, t in docs])
         qfreq = Counter(qgrams)
@@ -229,14 +246,19 @@ class TFIDFIndex:
         known_ckeys = {r[0] for r in self._conn.execute(
             "SELECT ckey FROM doc WHERE ckey IS NOT NULL")}
         docs: list[tuple[str, str, str, dict, int]] = []  # (path, ckey, norm, grams, len)
+        drop_paths: set[str] = set()  # P3.12 红act：已索引的 redacted 文档须从倒排剔除
         for tier in tiers:
             for d in scan_tier_dirs(mem_root, tier, projects):
                 for md in d.glob("*.md"):
-                    if str(md) in known:
-                        continue
                     try:
                         txt = md.read_text(encoding="utf-8")
                     except Exception:
+                        continue
+                    if is_redacted(txt):
+                        if str(md) in known:
+                            drop_paths.add(str(md))
+                        continue  # 红act 文档不新索引；脱敏后重建索引即完成剔除（不可省略）
+                    if str(md) in known:
                         continue
                     norms = _norm(txt)
                     grams = Counter(_tokens(norms))
@@ -247,7 +269,13 @@ class TFIDFIndex:
                         continue  # A3 ASI06：同内容已索引，防重复/污染
                     known_ckeys.add(ckey)
                     docs.append((str(md), ckey, norms, grams, len(norms)))
-        if not docs:
+        # P3.12 红act：从倒排剔除已 redacted 的旧索引条目（否则倒排仍残留该秘文）。
+        # 必须在「新文档为空即早退」之前执行，保证重建索引仅剔除脱敏稿时也生效。
+        if drop_paths:
+            for p in drop_paths:
+                self._conn.execute("DELETE FROM doc WHERE path=?", (p,))
+            self._conn.commit()
+        if not docs and not drop_paths:
             return 0
         # 文档级写入
         for path, _ckey, norms, grams, ln in docs:

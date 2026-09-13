@@ -20,7 +20,7 @@ from mempipeline.audit import FileAudit
 from mempipeline.governance import (
     filter_note, score_note, stale_days, transition, review_queue, vault_status,
     scan_stale_notes, governance_health, VALID_TRANSITIONS,
-    _half_life, TIER_POLICY, SUPERSEDED_PENALTY,
+    _half_life, TIER_POLICY, SUPERSEDED_PENALTY, redact,
 )
 from mempipeline.protocol import Note, TIER_DIR
 from mempipeline.engine import write_atomic
@@ -340,6 +340,75 @@ def main() -> bool:
         check(("status: \"active\"" in old_x.read_text(encoding="utf-8")
                or "status: active" in old_x.read_text(encoding="utf-8")),
               "D3: 只出候选、未改写文件状态")
+
+    # ---- 9. P3.12 红act/记忆脱敏：recall 两路切断 + 软终态 + 审计轨迹 + 硬脱敏 ----
+    print("== P3.12 红act/记忆脱敏 ==")
+    from mempipeline.recall import MemoryRecall, TFIDFIndex
+    with tempfile.TemporaryDirectory() as td7:
+        tmp7 = Path(td7)
+        mem7 = tmp7 / "mem"
+        (mem7 / TIER_DIR["long"]).mkdir(parents=True)
+        aud7 = FileAudit(tmp7 / "audit" / "log.md", tmp7 / "audit" / "manifest.json", mem7)
+        secret = Note(title="密钥配置", summary="AKSK", tier="long", importance=0.9,
+                      body="密钥 sk_live_abc123 与 token 属敏感泄露内容。", status="active")
+        out7 = mem7 / TIER_DIR["long"] / "密钥-redact-abcd.md"
+        write_atomic(out7, secret.to_frontmatter() + "\n\n" + secret.body + "\n", aud7)
+        idx7 = TFIDFIndex(tmp7 / "idx.sqlite")
+        idx7.build(mem7)
+        mk7 = MemoryRecall(mem7, index=idx7)   # 倒排快路径
+        full7 = MemoryRecall(mem7)             # 无索引 → 全扫路
+        q7 = "密钥 sk_live"
+
+        def _hit(backend):
+            return any(str(out7) == p for p, _ in backend.recall(q7, k=20))
+
+        check(_hit(full7) and _hit(mk7),
+              "红act前: recall 全扫 + TFIDF 两路均命中该稿")
+
+        # 红act（软脱敏默认：标记 + 重建索引）→ 两路均不再返回
+        st_a, f_a = redact(out7, aud7)
+        check(st_a in ("wrote", "skipped") and f_a == "active",
+              f"红act 软脱敏迁移成功（{st_a}，{f_a}）")
+        idx7.build(mem7)                       # 脱敏后重建索引（不可省略）
+        check(not _hit(full7) and not _hit(mk7),
+              "红act后: recall 全扫 + TFIDF 两路均不再命中该稿")
+
+        # 审计轨迹可还原 …→redacted，历史条目不丢
+        rel7 = str(out7.resolve().relative_to(mem7.resolve())).replace("\\", "/")
+        life7 = aud7.lifecycle(rel7)
+        check(bool(life7) and life7[-1]["to"] == "redacted",
+              f"审计轨迹含 …→redacted（{life7}）")
+
+        # redacted 是软终态：再迁出被 VALID_TRANSITIONS 合法拒绝
+        st_b, f_b = transition(out7, "active", aud7)
+        check(st_b == "invalid_transition" and f_b == "redacted",
+              f"redacted→active 非法迁移被拒（{st_b}，{f_b}）")
+
+        # 软脱敏默认保留正文（可逆、忠于审计）
+        check("sk_live" in out7.read_text(encoding="utf-8"),
+              "软脱敏默认保留正文（可逆，忠于审计取证）")
+        idx7.close()
+
+    # ---- 9b. 硬脱敏：独立显式通道，先备份到 git 外归档区，再抹正文，审计记新 hash ----
+    with tempfile.TemporaryDirectory() as td8:
+        tmp8 = Path(td8)
+        mem8 = tmp8 / "mem"
+        (mem8 / TIER_DIR["long"]).mkdir(parents=True)
+        aud8 = FileAudit(tmp8 / "audit" / "log.md", tmp8 / "audit" / "manifest.json", mem8)
+        secret2 = Note(title="硬脱敏稿", summary="token", tier="long", importance=0.9,
+                       body="token sk_secret_xyz 需彻底抹除。", status="active")
+        out8 = mem8 / TIER_DIR["long"] / "硬脱敏稿-0123abcd.md"
+        write_atomic(out8, secret2.to_frontmatter() + "\n\n" + secret2.body + "\n", aud8)
+        arch8 = tmp8 / "archive"
+        st_w, f_w = redact(out8, aud8, wipe=True, archive_dir=arch8)
+        check(st_w in ("wrote", "skipped") and f_w == "active",
+              f"硬脱敏（显式 wipe）成功（{st_w}，{f_w}）")
+        baks = list(arch8.glob("*.md"))
+        check(len(baks) == 1 and "sk_secret_xyz" in baks[0].read_text(encoding="utf-8"),
+              "硬脱敏先备份原稿正文到 git 外归档区（防丢失底线）")
+        wiped = out8.read_text(encoding="utf-8")
+        check("sk_secret_xyz" not in wiped and "redacted" in wiped,
+              "硬脱敏后正文被抹为占位符、文件仍红act标记保留")
 
     print("\nGOVERNANCE (E3'):", "ALL PASS" if ok else "SOME FAILED")
     return ok

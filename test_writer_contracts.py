@@ -138,7 +138,9 @@ def main() -> bool:
         medium_d = root / "02-中期记忆"
         long_d.mkdir()
         medium_d.mkdir()
-        (long_d / "项目约束-aa.md").write_text(_fm("distill_memory", "long", "项目约束-aa", "aa"), encoding="utf-8")
+        # 三因子分档后 long 归档线降至 0.1（近永久，importance≥0.3 的稿不会破线），
+        # 故可治理候选改用 medium 档验证 non_governable 过滤，避免被新阈值误判为不候选
+        (medium_d / "项目约束-aa.md").write_text(_fm("distill_memory", "medium", "项目约束-aa", "aa"), encoding="utf-8")
         (medium_d / "项目会话-bb.md").write_text(_fm("staging_ingest", "medium", "项目会话-bb"), encoding="utf-8")
         both = scan_stale_notes(root)
         has_staging = any("项目会话-bb" in c.get("path", "") for c in both)

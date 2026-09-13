@@ -20,6 +20,7 @@ from mempipeline.audit import FileAudit
 from mempipeline.governance import (
     filter_note, score_note, stale_days, transition, review_queue, vault_status,
     scan_stale_notes, governance_health, VALID_TRANSITIONS,
+    _half_life, TIER_POLICY, SUPERSEDED_PENALTY,
 )
 from mempipeline.protocol import Note, TIER_DIR
 from mempipeline.engine import write_atomic
@@ -54,6 +55,85 @@ def main() -> bool:
     d0 = stale_days(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     d300 = stale_days((datetime.now() - timedelta(days=300)).strftime("%Y-%m-%d %H:%M:%S"))
     check(d0 == 0 and d300 >= 299, f"stale_days 计算正确（0 / {d300}）")
+
+    # ---- 2.5 三因子治理分档：TIER_POLICY + 半衰期自适应（tier > importance）----
+    print("== 三因子分档 ==")
+    check(TIER_POLICY["long"]["half_life"] == 1095 and
+          TIER_POLICY["medium"]["half_life"] == 180,
+          "TIER_POLICY 半衰期基座（long≈3年 / medium=180天）")
+    check(TIER_POLICY["long"]["threshold"] == 0.1 and
+          TIER_POLICY["medium"]["threshold"] == 0.2,
+          "TIER_POLICY 归档线（long=0.1 / medium=0.2）")
+    check(TIER_POLICY["long"]["stale_binary"] is False and
+          TIER_POLICY["medium"]["stale_binary"] is True,
+          "stale 二进制开关：long 禁用 / medium 保留")
+    # importance 连续微调：HL = base × (0.5 + importance)
+    check(abs(_half_life(0.9, tier="medium") - 180 * 1.4) < 1e-9 and
+          abs(_half_life(0.6, tier="medium") - 180 * 1.1) < 1e-9 and
+          abs(_half_life(0.3, tier="medium") - 180 * 0.8) < 1e-9,
+          "half_life 连续微调（imp0.9→×1.4 / 0.6→×1.1 / 0.3→×0.8）")
+    check(_half_life(0.6, half_life=90) == 90, "显式 half_life 覆盖微调")
+    # 反向验证半衰期生效：同旧度下 long 半衰期更长 → 衰减更慢 → 分数更高
+    same_days = 400
+    s_long = score_note(importance=0.6, days_since_active=same_days, tier="long")
+    s_med = score_note(importance=0.6, days_since_active=same_days, tier="medium")
+    check(s_long > s_med, f"长期记忆衰减更慢（long {s_long:.3f} > medium {s_med:.3f}）")
+    # 同 tier 下 importance 越高越慢衰减：imp0.9 分数 > imp0.3
+    s_hi = score_note(importance=0.9, days_since_active=same_days, tier="medium")
+    s_lo = score_note(importance=0.3, days_since_active=same_days, tier="medium")
+    check(s_hi > s_lo, f"importance 微调更慢衰减（{s_hi:.3f} > {s_lo:.3f}）")
+
+    # ---- 2.6 三因子联动：scan_stale_notes 按 tier 取归档线 + valid_to 降权 ----
+    print("== 三因子联动扫描 ==")
+    with tempfile.TemporaryDirectory() as td6:
+        tmp6 = Path(td6)
+        mem6 = tmp6 / "mem"
+        (mem6 / TIER_DIR["long"]).mkdir(parents=True)
+        (mem6 / TIER_DIR["medium"]).mkdir(parents=True)
+        aud6 = FileAudit(tmp6 / "audit" / "log.md", tmp6 / "audit" / "manifest.json", mem6)
+        now6 = datetime.now()
+        old_ts = (now6 - timedelta(days=415)).strftime("%Y-%m-%d %H:%M:%S")
+
+        # 同一大量旧 + 低 importance 的两篇：仅 medium 跌破其 0.2 归档线，
+        # long 因半衰期更长+归档线更低(0.1) 不入选 → 证明 tier 分档真正生效
+        note_lo_m = Note(title="冷稿medium", summary="久未用", tier="medium",
+                         importance=0.3, body="很旧。", status="active", updated=old_ts)
+        out_lo_m = mem6 / TIER_DIR["medium"] / "冷稿medium-aa11.md"
+        write_atomic(out_lo_m, note_lo_m.to_frontmatter() + "\n\n" + note_lo_m.body + "\n", aud6)
+        note_lo_l = Note(title="冷稿long", summary="久未用", tier="long",
+                         importance=0.3, body="很旧。", status="active", updated=old_ts)
+        out_lo_l = mem6 / TIER_DIR["long"] / "冷稿long-bb22.md"
+        write_atomic(out_lo_l, note_lo_l.to_frontmatter() + "\n\n" + note_lo_l.body + "\n", aud6)
+
+        # 一篇新 + 高 importance 的 long 稿，被 superseded 集命中 → 即使分高于归档线
+        # 也单列 supersede 候选（valid_to 强失效轨道），且不改文件状态
+        fresh_l = Note(title="新稿long", summary="刚记", tier="long", importance=0.9,
+                       body="新鲜。", status="active")
+        out_fresh = mem6 / TIER_DIR["long"] / "新稿long-cc33.md"
+        write_atomic(out_fresh, fresh_l.to_frontmatter() + "\n\n"
+                     + fresh_l.body + "\n", aud6)
+
+        cand6 = scan_stale_notes(mem6, superseded={str(out_fresh)})
+        paths6 = {c["path"] for c in cand6}
+        # 默认按 tier 归档线：medium 冷稿入选(0.15<0.2)，long 冷稿不入选(0.32>0.1)
+        m_row = next((c for c in cand6 if c["path"] == str(out_lo_m)), None)
+        l_row = next((c for c in cand6 if c["path"] == str(out_lo_l)), None)
+        check(m_row is not None and m_row["suggestion"] == "archive",
+              "三因子: medium 冷稿跌破 0.2 归档线 → archive")
+        check(l_row is None, "三因子: 同旧度 long 冷稿不跌破其 0.1 归档线 → 不入选")
+        # valid_to 强失效轨道：降权 0.4 且高优先级单列（即使 score 未破线）
+        sup_row = next((c for c in cand6 if c["path"] == str(out_fresh)), None)
+        check(sup_row is not None and sup_row["suggestion"] == "supersede" and
+              sup_row["signal"] == "superseded",
+              "三因子: superseded 命中即单列 supersede 候选（不分是否破线）")
+        check(abs(sup_row["score"] - round(
+                score_note(importance=0.9, days_since_active=0)
+                * SUPERSEDED_PENALTY, 3)) < 1e-9,
+              f"三因子: superseded 降权 score=score×{SUPERSEDED_PENALTY}"
+              f"（{sup_row['score']}）")
+        check("status: \"active\"" in out_fresh.read_text(encoding="utf-8")
+              or "status: active" in out_fresh.read_text(encoding="utf-8"),
+              "三因子: superseded 只出候选、不改写文件状态")
 
     # ---- 3. 状态迁移 + 零删除 ----
     print("== 状态迁移 ==")

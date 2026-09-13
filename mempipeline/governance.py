@@ -47,6 +47,20 @@ STALE_DAYS = 30          # 与 distill_memory._lifecycle 一致
 SCORE_W = {"reuse": 0.4, "decay": 0.3, "feedback": 0.2, "hit": 0.1}
 ARCHIVE_THRESHOLD = 0.2  # score 低于阈值且长期未命中 → 建议归档
 
+# --- 三因子治理分档（valid_to 强失效 > tier 基础档 > importance 连续微调）---
+# 优先级：valid_to（被同主题新稿取代，强失效）> tier（基础基座）> importance（连续微调）。
+# - half_life：时间衰减的自适应半衰期基座（天）。long 对齐"长期永久"近永久基座(≈3年)，
+#   medium 沿用现值 180 天。实际半衰期 = half_life × (0.5 + importance)。
+# - threshold：该 tier 的建议归档线。long 更晚归档(0.1)，medium 沿用现值(0.2)。
+# - stale_binary：二进制 stale 标记开关。long 禁用（软降位不标 stale/archived）；
+#   medium 保留 stale:true/false。仅作配置声明，stale 落标由 distill 侧按此消费。
+TIER_POLICY = {
+    "long": {"half_life": 1095, "threshold": 0.1, "stale_binary": False},
+    "medium": {"half_life": 180, "threshold": 0.2, "stale_binary": True},
+}
+DEFAULT_HALF_LIFE = 180  # 缺省半衰期基座：无 tier 上下文时回落旧全局值
+SUPERSEDED_PENALTY = 0.4  # valid_to 触发后的治理降权：score_final = score × 0.4
+
 
 def filter_note(fm: dict) -> tuple[bool, str]:
     """过滤规则：kind 白名单 + 黑名单特征。返回 (通过?, 原因)。
@@ -63,15 +77,34 @@ def filter_note(fm: dict) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _half_life(importance: float, tier: str | None = None,
+               half_life: float | None = None) -> float:
+    """自适应半衰期（天）：HL = HL_tier × (0.5 + importance)。
+
+    - tier 取 TIER_POLICY 基础半衰期基座（long≈3年，medium=180 天）；
+      importance 连续微调：imp0.9→×1.4、imp0.6→×1.1、imp0.3→×0.8。
+    - 显式 half_life 覆盖一切（测试注入用）；无 tier 上下文回落全局 180。
+    """
+    if half_life is not None:
+        return float(half_life)
+    base = DEFAULT_HALF_LIFE
+    if tier and tier in TIER_POLICY:
+        base = TIER_POLICY[tier]["half_life"]
+    return base * (0.5 + float(importance))
+
+
 def score_note(importance: float = 0.6, days_since_active: int = 0,
-               hits: int = 0, feedback: float = 0.0) -> float:
+               hits: int = 0, feedback: float = 0.0,
+               tier: str | None = None, half_life: float | None = None) -> float:
     """可解释线性分：0.4×复用(importance 归一) + 0.3×时间衰减 + 0.2×反馈 + 0.1×命中。
 
-    - 时间衰减 exp(-days/180)：days 用 stale 判定（>STALE_DAYS=30 天未活跃即显著衰减）
+    - 时间衰减 exp(-days/HL)：半衰期可经 tier→importance 自适应（三因子），也支持
+      显式 half_life 注入；缺省回落全局 180（存量行为不变，测试不回退）
     - 输出 0~1，可配置（SCORE_W），语义与 distill _lifecycle 衔接
     """
     reuse = min(1.0, importance / 0.9)
-    decay = math.exp(-max(0, days_since_active) / 180.0)
+    hl = _half_life(importance, tier=tier, half_life=half_life)
+    decay = math.exp(-max(0, days_since_active) / hl)
     fb = max(0.0, min(1.0, feedback))
     hit = min(1.0, hits / 10.0)
     return (SCORE_W["reuse"] * reuse + SCORE_W["decay"] * decay
@@ -203,30 +236,49 @@ def _path_writer(path: str | None) -> str | None:
 
 def scan_stale_notes(mem_root: Path, tiers: Iterable[str] | None = None,
                      projects: Iterable[str] | None = None,
-                     threshold: float = ARCHIVE_THRESHOLD,
+                     threshold: float | None = None,
                      timeline: dict | None = None,
-                     non_governable_writers: set[str] | None = None) -> list[dict]:
+                     non_governable_writers: set[str] | None = None,
+                     superseded: set[str] | None = None) -> list[dict]:
     """P1 质量扫描：自动标记旧/冷/冗余候选，只出清单、不自动改状态。
 
     遍历各 tier 笔记，按 stale_days 与 score_note 算（旧度、评分），把 score
-    低于 threshold 且处于活跃态（非 archived/rejected）的笔记列为"建议归档"
-    候选。返回结构化清单；**不执行任何 transition**——人工只在最终裁决点
-    （晋升/归档）出现一次，其余全部由系统兜底。
+    低于该 tier 归档线（TIER_POLICY[threshold]）且处于活跃态（非 archived/
+    rejected）的笔记列为"建议归档"候选。返回结构化清单；**不执行任何
+    transition**——人工只在最终裁决点（晋升/归档）出现一次，其余由系统兜底。
+
+    三因子分档：thr 默认按 `tier` 取 TIER_POLICY（long=0.1 / medium=0.2），
+    显式 `threshold` 可整体覆盖（存量调用语义不变）；score 半衰期经
+    tier→importance 自适应（见 score_note）。
 
     P3-③（时间图谱信号使入治理）：可选 `timeline`（`timegrap.build_timeline`
     输出 {subject: TopicTimeline}）注入后，额外把时间图谱的**结论漂移(drift)**
     与**断更后复活(revived)** 信号并入同一候选清单——仍不自动改状态。信号
     复用 timegrap（经 P3-1 实测），不新增第二套度量。
 
-    返回字段（旧/冷候选）：{path, status, stale_days, score, suggestion}；
-    信号候选额外含 {subject, signal, signal_detail}。
+    `superseded`（可选，P2-B 单点数据源 `recall_golden.stale_map` 产出的
+    path 集）：命中「已被同主题后续稿取代」的旧稿时，对其做强失效降权——
+    score_final = score × SUPERSEDED_PENALTY(0.4)，且**即使分未跌破归档线也
+    单列高优先级候选**（suggestion=supersede）。只出候选、不改 status、不落
+    archived/rejected，真正落位仅当人工经 transition 显式触发，零删除。
+
+    返回字段（归档候选）：{path, status, stale_days, score, suggestion}；
+    信号候选额外含 {subject, signal, signal_detail}；superseded 候选带
+    signal=superseded。
     """
     from .protocol import TIER_DIR
     from .recall import scan_tier_dirs
+    tier_key = {v: k for k, v in TIER_DIR.items()}
     if tiers is None:
         tiers = TIER_DIR.values()
+    superseded = superseded or set()
     out: list[dict] = []
     for tier in tiers:
+        key = tier_key.get(tier) or "medium"
+        if threshold is None:
+            thr = TIER_POLICY[key]["threshold"]
+        else:
+            thr = threshold
         for d in scan_tier_dirs(mem_root, tier, projects):
             for md in sorted(d.glob("*.md")):
                 try:
@@ -243,8 +295,20 @@ def scan_stale_notes(mem_root: Path, tiers: Iterable[str] | None = None,
                 updated = _read_fm_value(fm, "updated") or None
                 days = stale_days(updated)
                 imp = _roz_importance(fm)
-                score = score_note(importance=imp, days_since_active=days)
-                if score < threshold:
+                score = score_note(importance=imp, days_since_active=days, tier=key)
+                if str(md) in superseded:
+                    # P2-B：valid_to 强失效轨道——降权且高优先级单列，不改状态
+                    out.append({
+                        "path": str(md),
+                        "status": status,
+                        "stale_days": days,
+                        "score": round(score * SUPERSEDED_PENALTY, 3),
+                        "suggestion": "supersede",
+                        "signal": "superseded",
+                        "signal_detail": "过时旧稿：valid_to 触发（被同主题新稿取代）",
+                    })
+                    continue
+                if score < thr:
                     out.append({
                         "path": str(md),
                         "status": status,

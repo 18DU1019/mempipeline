@@ -16,6 +16,30 @@ from typing import Optional
 TIER_DIR = {"long": "01-长期记忆", "medium": "02-中期记忆"}
 DEFAULT_TIER = "medium"
 
+# P0-写侧信任分层（方案 B 三档）：trusted=单写者蒸馏主链等高信任来源；
+# untrusted=投稿等未信任来源；unknown=无标记存量（既有笔记无该字段，保守回落）。
+TRUST_KNOWN = "trusted"
+TRUST_UNKNOWN = "unknown"
+TRUST_UNTRUSTED = "untrusted"
+TRUST_LABELS = (TRUST_KNOWN, TRUST_UNKNOWN, TRUST_UNTRUSTED)
+
+
+def normalize_trust(raw: str | None, trusted: frozenset[str]) -> str:
+    """把原始信任标记归一为三档；trusted 允许来源名单由调用方注入。
+
+    规则：
+    - 空/None → unknown（无标记的保守回落）；
+    - 与三档之一精确匹配（大小写不敏感、去空白）→ 原档；
+    - 其余任意值 → 出现在 trusted 名单视为 trusted，否则 untrusted。
+    数据无关：不写死任何来源名单，判定名单由调用方（ingest 等）注入。
+    """
+    if not raw:
+        return TRUST_UNKNOWN
+    v = str(raw).strip().lower()
+    if v in TRUST_LABELS:
+        return v
+    return TRUST_KNOWN if v in {str(t).strip().lower() for t in trusted} else TRUST_UNTRUSTED
+
 
 def now_iso() -> str:
     return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")

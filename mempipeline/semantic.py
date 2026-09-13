@@ -252,13 +252,17 @@ def hybrid_recall(query: str, k: int = 8, mem_root: Path | None = None,
                   memory: MemoryRecall | None = None,
                   time_weight: float = 0.0,
                   decay_half_life_days: int = 90,
-                  decay_strategy: str = "exponential") -> list[tuple[str, float]]:
+                  decay_strategy: str = "exponential",
+                  trust_rank: bool = False,
+                  trusted_agents: frozenset[str] | None = None) -> list[tuple[str, float]]:
     """lexical(TF-IDF) + semantic(bge-m3) 双路 RRF 融合召回。
 
     - index 缺省 → 纯 TF-IDF 路径（语义不可用时自动回落，可逆）
     - memory 可注入现成实例（复用同义归一配置），缺省按参数新建
     - time_weight/decay_*（D1）：time_weight>0 时按策略时新度加权排序；
       time_weight=0（默认）恒等于不引入，完全保持现状（黄金护栏兜底）
+    - trust_rank（P0）：True 时对最终结果做信任降权（trusted>unknown>untrusted，
+      同档保原序，k 收紧时 untrusted 先裁）。默认 False 完全保持现状。
     - 返回 [(path, fused_score)]，降序
     """
     embed_fn = embed_fn or embed
@@ -284,4 +288,15 @@ def hybrid_recall(query: str, k: int = 8, mem_root: Path | None = None,
                                   strategy=decay_strategy) ** w))
              for p, s in fused),
             key=lambda kv: -kv[1])
+    if trust_rank:
+        # P0 信任降权（调用方二段）：trusted>unknown>untrusted，同档保原序。
+        from .trust_rank import rank_with_trust, trust_of_path
+        from .protocol import TRUST_UNKNOWN
+        _trusted = trusted_agents if trusted_agents is not None else frozenset({"workbuddy"})
+        def _trust(p: str) -> str:
+            try:
+                return trust_of_path(p, _trusted)
+            except Exception:
+                return TRUST_UNKNOWN
+        fused = rank_with_trust(fused, _trust, k=k)
     return fused

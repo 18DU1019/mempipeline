@@ -356,6 +356,8 @@ class _Handler(BaseHTTPRequestHandler):
     semantic_index: object | None = None
     tfidf_index: object | None = None  # TF-IDF 倒排快路径（MemoryRecall 注入）
     audit: object | None = None  # 真实 AuditBackend（面板晋升写审计）
+    trust_rank: bool = False  # P0 信任降权开关（默认关，保持既有召回行为）
+    _trusted: frozenset[str] = frozenset({"workbuddy"})
 
     def log_message(self, *a):  # 静默访问日志
         pass
@@ -394,7 +396,9 @@ class _Handler(BaseHTTPRequestHandler):
                                             self.mem_root,
                                             projects=[proj] if proj else None,
                                             index=self.tfidf_index),
-                                        projects=[proj] if proj else None)
+                                        projects=[proj] if proj else None,
+                                        trust_rank=self.trust_rank,
+                                        trusted_agents=self._trusted)
                 except Exception:
                     res = self._tfidf(q, k, proj)
             else:
@@ -412,7 +416,19 @@ class _Handler(BaseHTTPRequestHandler):
     def _tfidf(self, q: str, k: int, proj: str | None) -> list:
         m = MemoryRecall(self.mem_root, projects=[proj] if proj else None,
                          index=self.tfidf_index)
-        return [(p, 1.0 / (i + 1)) for i, (p, _) in enumerate(m.recall(q, k))]
+        hits = m.recall(q, k)
+        if self.trust_rank:
+            from .trust_rank import rank_with_trust
+            hits = rank_with_trust(hits, self._trust_of, k=k)
+        return [(p, 1.0 / (i + 1)) for i, (p, _) in enumerate(hits)]
+
+    def _trust_of(self, path: str) -> str:
+        from .protocol import TRUST_UNKNOWN
+        from .trust_rank import trust_of_path
+        try:
+            return trust_of_path(path, self._trusted)
+        except Exception:
+            return TRUST_UNKNOWN
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)

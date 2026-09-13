@@ -10,8 +10,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from .protocol import (DEFAULT_TIER, TIER_DIR, Note, content_key, safe_project_id,
-                       strip_frontmatter, title_token, unquote)
+from .protocol import (DEFAULT_TIER, TIER_DIR, TRUST_UNKNOWN, Note, content_key,
+                       normalize_trust, safe_project_id, strip_frontmatter,
+                       title_token, unquote)
 from .engine import write_atomic
 from .audit import AuditBackend
 
@@ -41,24 +42,24 @@ def _parse_fm(text: str) -> dict:
     out["domain"] = get("domain")
     out["kind"] = get("kind")
     out["created"] = get("created")
+    out["trust"] = get("trust")  # P0：显式信任标记（投稿可选），写侧落盘
     return out
 
 
 def ingest(staging_dir: Path, mem_root: Path, tier_dirs: dict[str, str] | None,
            audit: AuditBackend, on_ingest=None, dry_run: bool = False,
            crossref: bool = False, log: Callable[[str], None] | None = None,
-           require_project: bool = False) -> dict:
+           require_project: bool = False,
+           trusted_agents: frozenset[str] | None = None) -> dict:
     """扫描 staging 目录，用前端协议 + 引擎把带 frontmatter 的裸 md 熔合进镜像。
 
-    tier_dirs 传 None 时使用 protocol.TIER_DIR。非法/缺失的 memory_tier 回落 medium。
-    落盘为「单一 frontmatter（Note 生成）+ 正文」，原始 frontmatter 不重复进入正文。
-    project_id 存在时落盘到 projects/<project_id>/<tier_dir>/（E1 二维布局），
-    缺省回落 legacy 顶层 tier 目录；require_project=True 时无 project_id 投稿
-    拒绝入库（对齐 DSP「无 ID 禁上报」），计入 stats["rejected"]。
-    crossref=True 时在落盘前给新笔记注入到最相近旧笔记的 [[wikilinks]]（forward），
-    并对每篇命中笔记回写 backlink；两者都经 write_atomic（幂等 + 审计）。
-    交叉引用仅在同项目作用域内建链（G1：防止跨项目链接泄漏）。
-    返回 {"wrote": n, "skipped": n, "rejected": n, "crossref": {...}（可选）}。
+    ...（tier_dirs 等说明同上）
+
+    trusted_agents（P0）：写侧信任分层。投稿落盘时把信任档写入 frontmatter：
+    - 投稿显式声明 trust 字段 → 直接采用归一结果；
+    - 否则按 source_agent 是否在 trusted_agents 名单映射；
+    - trusted_agents 缺省 None ⇒ 仅信任 "workbuddy"（单写者蒸馏主链高信任）。
+    trust 写入 note.extra（经 to_frontmatter 透传），不参与桥导出白名单。
     """
     tier_dirs = tier_dirs or TIER_DIR
     if not staging_dir.is_dir():
@@ -77,17 +78,22 @@ def ingest(staging_dir: Path, mem_root: Path, tier_dirs: dict[str, str] | None,
         tier = fm.get("tier")
         if tier not in tier_dirs:
             tier = DEFAULT_TIER
+        source_agent = fm.get("source_agent") or "workbuddy"
+        # P0 写侧信任分层：可信任名单缺省仅 workbuddy；显式 trust 字段优先
+        trusted = trusted_agents if trusted_agents is not None else frozenset({"workbuddy"})
+        trust = normalize_trust(fm.get("trust") or source_agent, trusted)
         note = Note(
             title=fm.get("title") or "untitled",
             summary=fm.get("summary") or "（无摘要）",
             tier=tier,
             importance=0.6,
-            source_agent=fm.get("source_agent") or "workbuddy",
+            source_agent=source_agent,
             project_id=project_id,
             domain=fm.get("domain"),
             created=fm.get("created"),
             body=strip_frontmatter(raw).strip(),
         )
+        note.extra["trust"] = trust  # P0：信任档随 frontmatter 落盘（桥导出不透传）
         if fm.get("kind"):
             note.extra["kind"] = fm["kind"]
         token = title_token(note.title)

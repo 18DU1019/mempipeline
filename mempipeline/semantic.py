@@ -290,9 +290,9 @@ def hybrid_recall(query: str, k: int = 8, mem_root: Path | None = None,
             key=lambda kv: -kv[1])
     if trust_rank:
         # P0 信任降权（调用方二段）：trusted>unknown>untrusted，同档保原序。
+        from .protocol import DEFAULT_TRUSTED_AGENTS, TRUST_UNKNOWN
         from .trust_rank import rank_with_trust, trust_of_path
-        from .protocol import TRUST_UNKNOWN
-        _trusted = trusted_agents if trusted_agents is not None else frozenset({"workbuddy"})
+        _trusted = trusted_agents if trusted_agents is not None else DEFAULT_TRUSTED_AGENTS
         def _trust(p: str) -> str:
             try:
                 return trust_of_path(p, _trusted)

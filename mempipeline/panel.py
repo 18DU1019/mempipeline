@@ -357,7 +357,7 @@ class _Handler(BaseHTTPRequestHandler):
     tfidf_index: object | None = None  # TF-IDF 倒排快路径（MemoryRecall 注入）
     audit: object | None = None  # 真实 AuditBackend（面板晋升写审计）
     trust_rank: bool = False  # P0 信任降权开关（默认关，保持既有召回行为）
-    _trusted: frozenset[str] = frozenset({"workbuddy"})
+    _trusted: frozenset[str] = None  # 缺省在 _trust_of 内取 DEFAULT_TRUSTED_AGENTS
 
     def log_message(self, *a):  # 静默访问日志
         pass
@@ -423,10 +423,11 @@ class _Handler(BaseHTTPRequestHandler):
         return [(p, 1.0 / (i + 1)) for i, (p, _) in enumerate(hits)]
 
     def _trust_of(self, path: str) -> str:
-        from .protocol import TRUST_UNKNOWN
+        from .protocol import DEFAULT_TRUSTED_AGENTS, TRUST_UNKNOWN
         from .trust_rank import trust_of_path
+        trusted = self._trusted if self._trusted is not None else DEFAULT_TRUSTED_AGENTS
         try:
-            return trust_of_path(path, self._trusted)
+            return trust_of_path(path, trusted)
         except Exception:
             return TRUST_UNKNOWN
 

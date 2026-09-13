@@ -22,6 +22,9 @@ TRUST_KNOWN = "trusted"
 TRUST_UNKNOWN = "unknown"
 TRUST_UNTRUSTED = "untrusted"
 TRUST_LABELS = (TRUST_KNOWN, TRUST_UNKNOWN, TRUST_UNTRUSTED)
+# P0 默认可信任来源：单写者蒸馏主链唯一默认高信任。单一来源，供 ingest/semantic/panel
+# 缺省时共用（原三处各自硬编码 {"workbuddy"}，改这里即全局生效，符合「不写死来源」原则）。
+DEFAULT_TRUSTED_AGENTS: frozenset[str] = frozenset({"workbuddy"})
 
 
 def normalize_trust(raw: str | None, trusted: frozenset[str]) -> str:

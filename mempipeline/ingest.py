@@ -10,9 +10,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from .protocol import (DEFAULT_TIER, TIER_DIR, TRUST_UNKNOWN, Note, content_key,
-                       normalize_trust, safe_project_id, strip_frontmatter,
-                       title_token, unquote)
+from .protocol import (DEFAULT_TIER, DEFAULT_TRUSTED_AGENTS, TIER_DIR,
+                       TRUST_UNKNOWN, Note, content_key, normalize_trust,
+                       safe_project_id, strip_frontmatter, title_token, unquote)
 from .engine import write_atomic
 from .audit import AuditBackend
 
@@ -80,7 +80,7 @@ def ingest(staging_dir: Path, mem_root: Path, tier_dirs: dict[str, str] | None,
             tier = DEFAULT_TIER
         source_agent = fm.get("source_agent") or "workbuddy"
         # P0 写侧信任分层：可信任名单缺省仅 workbuddy；显式 trust 字段优先
-        trusted = trusted_agents if trusted_agents is not None else frozenset({"workbuddy"})
+        trusted = trusted_agents if trusted_agents is not None else DEFAULT_TRUSTED_AGENTS
         trust = normalize_trust(fm.get("trust") or source_agent, trusted)
         note = Note(
             title=fm.get("title") or "untitled",

@@ -107,6 +107,12 @@ def main() -> bool:
         d = root / "explicit.md"; d.write_text(
             "---\ntype: note\ntitle: D\nmemory_tier: medium\nimportance: 0.6\n"
             "source_agent: workbuddy\ntrust: untrusted\n---\n\n正文丁。\n", encoding="utf-8")
+        e = root / "emptytrust.md"; e.write_text(
+            "---\ntype: note\ntitle: E\nmemory_tier: medium\nimportance: 0.6\n"
+            "source_agent: workbuddy\ntrust:\n---\n\n正文戊。\n", encoding="utf-8")
+        f = root / "labelover.md"; f.write_text(
+            "---\ntype: note\ntitle: F\nmemory_tier: medium\nimportance: 0.6\n"
+            "source_agent: workbuddy\ntrust: unknown\n---\n\n正文己。\n", encoding="utf-8")
         check(trust_of_path(a, _TRUSTED) == TRUST_KNOWN,
               "source_agent=workbuddy(默认名单) -> trusted")
         check(trust_of_path(b, _TRUSTED) == TRUST_UNTRUSTED,
@@ -116,6 +122,11 @@ def main() -> bool:
         # 显式 trust 覆盖来源映射（D 虽 source=workbuddy 但显式 untrusted→untrusted）
         check(trust_of_path(d, _TRUSTED) == TRUST_UNTRUSTED,
               "显式 trust=untrusted 覆盖来源映射")
+        # 单读重构边界：trust 无标量值（空）→ 回落 source_agent；显式档值覆盖可信来源
+        check(trust_of_path(e, _TRUSTED) == TRUST_KNOWN,
+              "显式 trust 空值回落 source_agent=workbuddy -> trusted")
+        check(trust_of_path(f, _TRUSTED) == TRUST_UNKNOWN,
+              "显式 trust=unknown 覆盖可信来源 -> unknown")
 
     # ---- 4. ingest 写侧落盘：投稿 frontmatter 含 trust 档 ----
     print("== ingest 写侧 trust 落盘 ==")

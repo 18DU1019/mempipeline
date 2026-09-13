@@ -1,8 +1,7 @@
 # 记忆脱敏 / 红act 设计备忘
 
-> 版本 v1.2（2026-09-13，核心+展示收敛已落码回归绿） · 上游：对照研究 P3.12 候选
-> 状态：`implemented（除缓存剔除外均已实现）` —— 已落：软终态 + recall 两路检索切断 + timegrap 信号排除 + 软/硬脱敏 + 审计轨迹（commit 3ff5b76）＋ 展示/导出收敛（panel /api/browse 剔除 redacted，commit 待建，见下）。
-> 未落（后续步）：§7·B qemb 语义缓存剔除。
+> 版本 v1.3（2026-09-13，全量落码回归绿） · 上游：对照研究 P3.12 候选
+> 状态：`implemented` —— 已落：软终态 + recall 两路检索切断 + timegrap 信号排除 + 软/硬脱敏 + 审计轨迹（commit 3ff5b76）＋ 展示/导出收敛（panel /api/browse 剔除 redacted）＋ 语义层剔除（SemanticIndex.build 从 emb 删 redacted 向量 + gen 换代令 qres 缓存失效）。
 > 对齐语义：Claude Managed Agents 的 redact + 红act（官方一手）；与 mempipeline「零删除 + 本地闭环」硬约束兼容。
 
 ---
@@ -118,7 +117,7 @@ panel 与 bridge 对 `status: redacted` 一律不出现于任何列表/检索结
 ## 7·B 遗留边界（非本规格范围，明示）
 
 - **git 层泄漏**：若某条含秘文正文此前已被 git trailing，红act 只能脱离"检索/导出"态，无法清除 git 历史中的旧 version——真正的硬脱敏需在 git 层处理（如 `git gc`/filter 重写），超出本次规格。
-- **语义嵌入缓存（RRF qemb/qres）**：若某 doc 索引过 qemb，redact 成终态是否需从缓存/索引剔除，落地时一并处理（对齐 2.3 的"重建索引"语义）。
+- **语义缓存（qemb/qres，已落码）**：裁决后明示——`qemb` 存的是查询嵌入（键为查询 hash），不含文档路径，**本身不构成泄漏源**；真正的语义泄漏在 `emb`（redacted 文档向量残留）与 `qres`（结果快照含 redacted 路径）。落地：`SemanticIndex.build` 对 redacted 文档删除 `emb` 向量 + `_bump_gen()` 换代令 `qres` 缓存失效（对齐 recall.TFIDFIndex `drop_paths` 语义，重建索引不可省略）。
 
 ---
-*已落码部分（commit 3ff5b76 + 展示收敛提交）以代码为准；未落码部分（§7·B qemb 缓存剔除）不构成实现承诺，落地以人工裁决并在 ROADMAP P3.12 更新为准。*
+*代码为准（P3.12 全量落码）。落地以人工裁决并在 ROADMAP P3.12 更新为准。*

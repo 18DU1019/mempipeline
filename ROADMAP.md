@@ -183,7 +183,7 @@
 - 从 redacted 再迁出（非法）被 `VALID_TRANSITIONS` 拒绝
 - 全套件回归绿
 
-**完整规格**见 `DESIGN-REDACT.md`。**落码状态（2026-09-13）**：软终态 + recall 两路检索切断 + timegrap 信号排除 + 软/硬脱敏 + 审计轨迹 + 展示收敛（panel /api/browse 剔除 redacted），全套件 7 passed（commit 3ff5b76 + 展示收敛提交）；**未落**：qemb 语义缓存剔除——落地以人工裁决后推进。
+**完整规格**见 `DESIGN-REDACT.md`。**落码状态（2026-09-13）**：软终态 + recall 两路检索切断 + timegrap 信号排除 + 软/硬脱敏 + 审计轨迹 + 展示收敛（panel /api/browse 剔除 redacted）＋ 语义层剔除（SemanticIndex.build 删 emb 向量 + gen 换代令 qres 失效），全套件 7 passed。P3.12 至此全量落码；剩余边界仅 git 层历史泄漏（独立于本文档，见 §7·B）。
 
 ---
 生成：ROADMAP v0.2（2026-09-12 联网复核并规划 D 段）。拟议阶段非既定计划。

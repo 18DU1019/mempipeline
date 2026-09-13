@@ -132,6 +132,33 @@ def main() -> bool:
         check(rc1 == rc2 and len(rc1) == 2, "top-k 缓存复用且条数=2")
         n_qres = c_idx._conn.execute("SELECT COUNT(*) FROM qres").fetchone()[0]
         check(n_qres == 1, f"qres 仅 1 行（实得 {n_qres}）")
+
+        # ---- 7. P3.12 §7·B 语义层 redact 剔除：emb 移除 + gen 换代令缓存失效 ----
+        print("== P3.12 语义层 redact 剔除 ==")
+        from mempipeline.protocol import TIER_DIR
+        # 先索引一篇 active 稿
+        (mem_root / TIER_DIR["long"]).mkdir(parents=True, exist_ok=True)
+        red_abs = mem_root / TIER_DIR["long"] / "密钥-red.md"
+        red_abs.write_text(
+            "---\ntitle: 密钥\nsummary: sk_live_tok\nmemory_tier: long\n"
+            "importance: 0.9\nstatus: active\n---\nsk_live_tok 属敏感。",
+            encoding="utf-8")
+        nb = c_idx.build(mem_root, embed_fn=fake_embed)
+        check(nb >= 1, f"active 稿已索引（新增 {nb}）")
+        in_emb = c_idx._conn.execute(
+            "SELECT 1 FROM emb WHERE path=?", (str(red_abs),)).fetchone()
+        check(in_emb is not None, "active 稿向量已入 emb 表")
+        g_before = c_idx.gen()
+        # redact 它（软终态标记），再重建索引 → 应剔除 + gen 换代
+        red_abs.write_text(
+            "---\ntitle: 密钥\nsummary: sk_live_tok\nmemory_tier: long\n"
+            "importance: 0.9\nstatus: redacted\n---\nsk_live_tok 属敏感。",
+            encoding="utf-8")
+        n_red = c_idx.build(mem_root, embed_fn=fake_embed)
+        in_emb = c_idx._conn.execute(
+            "SELECT 1 FROM emb WHERE path=?", (str(red_abs),)).fetchone()
+        check(in_emb is None, "redacted 稿向量已从 emb 剔除")
+        check(c_idx.gen() > g_before, f"redact 剔除触发 gen 换代（{g_before}→{c_idx.gen()}）")
         c_idx.close()
 
     print("\nSEMANTIC (E2'):", "ALL PASS" if ok else "SOME FAILED")

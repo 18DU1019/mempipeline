@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
-from .recall import MemoryRecall, scan_tier_dirs
+from .recall import MemoryRecall, is_redacted, scan_tier_dirs
 
 OLLAMA_EMBED_URL = "http://127.0.0.1:11434/api/embed"
 EMBED_MODEL = "bge-m3"
@@ -138,7 +138,13 @@ class SemanticIndex:
               projects: Iterable[str] | None = None,
               embed_fn: EmbedFn | None = None,
               limit: int = 0) -> int:
-        """扫描镜像构建索引（追加式：已索引路径跳过）。返回新增条数。"""
+        """扫描镜像构建索引（追加式：已索引路径跳过）。返回新增条数。
+
+        P3.12 redact 剔除：已 redacted 的文档既不再新索引，也会从 `emb`
+        表移除（对齐 recall.TFIDFIndex 的 `drop_paths` 语义），且 bump gen
+        令 `qres` 结果缓存随代数失效——否则秘文向量与缓存快照仍可被
+        semantic 召回。
+        """
         from .protocol import TIER_DIR
         if tiers is None:
             tiers = TIER_DIR.values()
@@ -148,20 +154,28 @@ class SemanticIndex:
         else:
             known = set()
         docs: list[tuple[str, str, str, str]] = []  # (path, text, tier, project)
+        drop_paths: set[str] = set()  # P3.12：已索引的 redacted 文档须从 emb 剔除
         for tier in tiers:
             for d in scan_tier_dirs(mem_root, tier, projects):
                 for md in d.glob("*.md"):
-                    if str(md) in known:
-                        continue
                     try:
                         txt = md.read_text(encoding="utf-8")
                     except Exception:
+                        continue
+                    if is_redacted(txt):
+                        drop_paths.add(str(md))
+                        continue  # redacted 文档不新索引；删除旧向量（不可省略）
+                    if str(md) in known:
                         continue
                     rel = str(md)  # 与 recall._recall 主键一致，RRF 融合不再分叉
                     rel_parts = md.relative_to(mem_root).parts
                     proj = rel_parts[1] if "projects" in rel_parts else ""
                     docs.append((rel, txt, tier, proj))
-        if not docs:
+        if drop_paths:
+            for p in drop_paths:
+                self._conn.execute("DELETE FROM emb WHERE path=?", (p,))
+            self._conn.commit()
+        if not docs and not drop_paths:
             return 0
         if limit and len(docs) > limit:
             docs = docs[:limit]

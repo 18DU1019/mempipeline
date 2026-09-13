@@ -48,20 +48,31 @@ GOLDEN: dict[str, str] = {
 MIN_HIT_RATE = 2 / 3
 
 
+def stale_map(mem_root: Path) -> dict[str, str]:
+    """由 timegrap 推导「过时旧稿」path→valid_to 图（P2-B，失效显影数据源）。
+
+    对每条时间脉络，取 valid_windows()（B4）：valid_to 非 None 的稿即「已被同主题
+    后续稿取代的旧稿」。返回 {path: valid_to}，valid_to 为 ISO 时间串（显影可直接
+    取日期部分）。纯只读，复用现有 timegrap 推导，零新增度量；单点数据源，
+    build_stale_map 复用它，读取侧显形（脚本 recall.py --stale-flag）也复用它。
+    """
+    from .timegrap import build_timeline
+    stale: dict[str, str] = {}
+    for tl in build_timeline(mem_root).values():
+        for w in tl.valid_windows():
+            if w["valid_to"] is not None:
+                stale[w["path"]] = w["valid_to"]
+    return stale
+
+
 def build_stale_map(mem_root: Path) -> set[str]:
     """由 timegrap 推导「过时旧稿」path 集（C3，FAMA 式过时复用判据）。
 
     对每条时间脉络，取 valid_windows()（B4）：valid_to 非 None 的稿即「已被同主题
     后续稿取代的旧稿」，命中它们视为过时复用。返回 path 绝对集，供 check(stale_paths=)
-    注入。纯只读，复用现有 timegrap 推导，零新增度量。
+    注入。纯只读，复用 stale_map（单数据源），零新增度量。
     """
-    from .timegrap import build_timeline
-    stale: set[str] = set()
-    for tl in build_timeline(mem_root).values():
-        for w in tl.valid_windows():
-            if w["valid_to"] is not None:
-                stale.add(w["path"])
-    return stale
+    return set(stale_map(mem_root))
 
 
 def check(mem_root: Path, tiers: Iterable[str] | None = None,

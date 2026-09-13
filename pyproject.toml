@@ -22,6 +22,7 @@ classifiers = [
 mempipeline-ingest = "mempipeline.ingest:main"
 mempipeline-bridge = "mempipeline.bridge:main"
 mempipeline-panel = "mempipeline.panel:main"
+mempipeline-commit = "mempipeline.auto_commit:main"
 
 [tool.setuptools.packages.find]
 include = ["mempipeline*"]

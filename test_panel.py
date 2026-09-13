@@ -141,7 +141,7 @@ def main() -> bool:
     return ok
 
 
-def test_submit_dq_roundtrip() -> bool:
+def test_submit_dq_roundtrip() -> None:
     """P3-0 面板投稿 DQ 转义闭环：特殊字符标题/正文 → staging → ingest 读回一致。
 
     回归点：_submit_note 的字符串字段经 _fmt_scalar（写侧转义契约），
@@ -198,10 +198,11 @@ def test_submit_dq_roundtrip() -> bool:
         fm3 = _read_frontmatter(mirror)
         check(fm3.get("title") == title, f"面板读回 title 一致（{fm3.get('title')!r}）")
     print("\nSUBMIT DQ ROUNDTRIP (P3-0):", "ALL PASS" if ok else "SOME FAILED")
-    return ok
+    if not ok:
+        raise AssertionError("test_submit_dq_roundtrip: 子断言失败")
 
 
-def test_null_audit_transition() -> bool:
+def test_null_audit_transition() -> None:
     """_NullAudit 无审计后端时面板晋升不崩溃（trace 由系统自动登记）。"""
     ok = True
 
@@ -237,11 +238,17 @@ def test_null_audit_transition() -> bool:
         check(out.exists() and 'promoted' in out.read_text(encoding="utf-8"),
               "晋升后文件保留且 status 已更新")
     print("\nNULL AUDIT TRANSITION:", "ALL PASS" if ok else "SOME FAILED")
-    return ok
+    if not ok:
+        raise AssertionError("test_null_audit_transition: 子断言失败")
 
 
 if __name__ == "__main__":
     panel_ok = main()
-    dq_ok = test_submit_dq_roundtrip()
-    na_ok = test_null_audit_transition()
-    sys.exit(0 if (panel_ok and dq_ok and na_ok) else 1)
+    for _name, _fn in (("SUBMI-DQ", test_submit_dq_roundtrip),
+                       ("NULL_AUDIT", test_null_audit_transition)):
+        try:
+            _fn()
+        except AssertionError as _e:
+            print(f"  [ERR] {_name}: {_e}")
+            panel_ok = False
+    sys.exit(0 if panel_ok else 1)

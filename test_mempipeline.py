@@ -116,7 +116,7 @@ def main() -> bool:
     return ok
 
 
-def test_crash_recover_sidecar() -> bool:
+def test_crash_recover_sidecar() -> None:
     """崩溃恢复 sidecar 专项：残留 .bak 应在幂等跳过时被登记为 recover 并清理。"""
     import shutil
     ok = True
@@ -152,9 +152,10 @@ def test_crash_recover_sidecar() -> bool:
         log = log_path.read_text(encoding="utf-8")
         check("| recover |" in log, "审计日志已登记 recover 行")
     print("\nCRASH RECOVER:", "ALL PASS" if ok else "SOME FAILED")
-    return ok
+    if not ok:
+        raise AssertionError("test_crash_recover_sidecar: 子断言失败")
 
-def test_tfidf_recall() -> bool:
+def test_tfidf_recall() -> None:
     """ngram TF-IDF 召回专项：命中率 / 区分度 / 同义不回归 / 接口不破。"""
     ok = True
 
@@ -207,10 +208,11 @@ def test_tfidf_recall() -> bool:
                   for t in hits), "返回 list[tuple[str,float]]")
         check(r.recall("") == [] and r.recall("   ") == [], "空查询返回 []")
     print("\nTFIDF RECALL:", "ALL PASS" if ok else "SOME FAILED")
-    return ok
+    if not ok:
+        raise AssertionError("test_tfidf_recall: 子断言失败")
 
 
-def test_recall_golden() -> bool:
+def test_recall_golden() -> None:
     """PDCA · Check 信号层：golden 回归命中率、passed 断言、并确保 Act 不自动改参数。"""
     ok = True
 
@@ -256,10 +258,11 @@ def test_recall_golden() -> bool:
         r2 = MemoryRecall(mem_root, synonyms=syn).recall("风险 仓位", k=5)
         check(r1 == r2, "check 无副作用：召回结果前后一致")
     print("\nRECALL GOLDEN (PDCA Check):", "ALL PASS" if ok else "SOME FAILED")
-    return ok
+    if not ok:
+        raise AssertionError("test_recall_golden: 子断言失败")
 
 
-def test_project_isolation() -> bool:
+def test_project_isolation() -> None:
     """E1：项目隔离 + 二维落盘 + crossref/recall 项目作用域（G1 回归）。"""
     ok = True
 
@@ -330,10 +333,11 @@ def test_project_isolation() -> bool:
         check(any("旧式" in f.name for f in (mem_root / "02-中期记忆").glob("*.md")),
               "无 project_id 回落 legacy 顶层目录")
     print("\nPROJECT ISOLATION (E1):", "ALL PASS" if ok else "SOME FAILED")
-    return ok
+    if not ok:
+        raise AssertionError("test_project_isolation: 子断言失败")
 
 
-def test_tfidf_index() -> bool:
+def test_tfidf_index() -> None:
     """TFIDFIndex（SQLite 倒排）与 MemoryRecall 结果一致性 + 增量 build + 空索引安全。
 
     P1-A2：验证倒排快路径的 Top-K 结果与全扫基准一致，且不触碰镜像（纯读索引）。
@@ -409,14 +413,17 @@ def test_tfidf_index() -> bool:
         mig_idx.close()
         idx.close()
     print("\nTFIDF INDEX (P1-A2):", "ALL PASS" if ok else "SOME FAILED")
-    return ok
+    if not ok:
+        raise AssertionError("test_tfidf_index: 子断言失败")
 
 
 if __name__ == "__main__":
-    main_result = main()
-    crash_result = test_crash_recover_sidecar()
-    tfidf_result = test_tfidf_recall()
-    golden_result = test_recall_golden()
-    iso_result = test_project_isolation()
-    tx_result = test_tfidf_index()
-    sys.exit(0 if (main_result and crash_result and tfidf_result and golden_result and iso_result and tx_result) else 1)
+    _ok = main()
+    for _fn in (test_crash_recover_sidecar, test_tfidf_recall, test_recall_golden,
+                test_project_isolation, test_tfidf_index):
+        try:
+            _fn()
+        except AssertionError as _e:
+            print(f"  [ERR] {_e}")
+            _ok = False
+    sys.exit(0 if _ok else 1)

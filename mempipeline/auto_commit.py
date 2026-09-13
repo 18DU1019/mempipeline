@@ -11,6 +11,9 @@
 - 语义闭合：staged 文件非空，且每个 staged 文件的索引版本 == 工作区版本
   （无「改了一半还没补充暂存」的半成品快照）。
 - 可逆/薄：不引新依赖，只编排既有 `git` 与 `.githooks/pre-commit`。
+
+本模块同时是「交付完成度巡检」入口（--inspect，只读零副作用）：在暂存阶段
+主动揭示半成品并给出补齐/拆分建议，不必等到提交时才被动报错。
 """
 from __future__ import annotations
 
@@ -46,6 +49,12 @@ def _unstaged_files(repo: Path) -> list[str]:
     if r.returncode != 0:
         return []
     return [p for p in r.stdout.split("\0") if p]
+
+
+def _diffstat(repo: Path, file: str) -> str:
+    """单个文件「工作区 vs 暂存」的 diffstat 摘要（用于巡检展示半成品规模）。"""
+    r = _run(["diff", "--shortstat", "--", file], repo)
+    return r.stdout.strip() or "(二进制/次异常)"
 
 
 def semantic_closure(repo: Path) -> tuple[bool, str, list[str]]:
@@ -84,18 +93,56 @@ def commit(repo: Path, files: list[str], message: str) -> tuple[int, str, str]:
     return r.returncode, r.stdout, r.stderr
 
 
+def inspect(repo: Path) -> int:
+    """交付完成度巡检（只读，零副作用）：主动揭示暂存区闭合度并给补救建议。
+
+    在暂存阶段调用，不等到提交时才被动报错：
+    - 空暂存 → 提示暂无待交付（rc 0，无阻塞）。
+    - 半成品 → 逐文件列未暂存 diffstat，给「补齐(git add) / 拆分
+      (git restore --staged)」两条出路（rc 1，未闭合）。
+    - 全闭合 → 列就绪交付并指向 mempipeline-commit 提交（rc 0）。
+    """
+    staged = staged_files(repo)
+    if not staged:
+        print("[巡检] 暂存区为空：暂无待交付（先精确 git add <files>）")
+        return 0
+    ready = [p for p in staged if p not in _unstaged_files(repo)]
+    wip = [p for p in staged if p in _unstaged_files(repo)]
+    print(f"[巡检] 暂存区 {len(staged)} 个文件：闭合可交付 {len(ready)}，半成品 {len(wip)}")
+    if ready:
+        print("  就绪可交付：")
+        for f in ready:
+            print(f"    {f}")
+        print("  提交：mempipeline-commit --repo <根>")
+    if wip:
+        print("  半成品（需 补齐 或 拆分，二选一）：")
+        for f in wip:
+            print(f"    {f}  → 未暂存改动: {_diffstat(repo, f)}")
+            print(f"        补齐:  git add {f}")
+            print(f"        拆分:  git restore --staged {f}")
+        print("[巡检] 交付未闭合：补齐后即可提交，或拆出另行独立交付")
+        return 1
+    print("[巡检] 交付已闭合，可直接提交")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="mempipeline 本地提交门禁入口")
     p.add_argument("--repo", default=".", help="git 仓库根（默认当前目录）")
     p.add_argument("--message", "-m", default=None, help="提交消息（缺省自动生成）")
     p.add_argument("--dry-run", action="store_true",
                    help="只做门禁判定与预览，不实际提交")
+    p.add_argument("--inspect", action="store_true",
+                   help="交付完成度巡检（只读）：揭示半成品并给补齐/拆分建议")
     a = p.parse_args(argv)
 
     repo = Path(a.repo).resolve()
     if not (repo / ".git").exists() and not (repo / ".git").is_dir():
         print(f"[auto-commit] 阻塞：{repo} 不是 git 仓库根")
         return 2
+
+    if a.inspect:
+        return inspect(repo)
 
     ok, reason, staged = semantic_closure(repo)
     if not ok:

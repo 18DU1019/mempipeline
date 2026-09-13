@@ -110,6 +110,20 @@ def main() -> bool:
         check(rc == 0 and head_before == head_after,
               "dry-run 返回 0 且未改变 HEAD")
 
+    # ---- 6. main --inspect：空暂存 rc0 / 半成品 rc1 且给补救建议 ----
+    print("== main --inspect：巡检 ==")
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        _init_repo(repo)
+        rc0 = _autocommit_main(["--repo", str(repo), "--inspect"])
+        check(rc0 == 0, "空暂存巡检 rc 0（无阻塞）")
+        file = repo / "wip.md"
+        file.write_text("---\ntitle: W\n---\n甲。\n", encoding="utf-8")
+        _git(repo, "add", "wip.md")
+        file.write_text("---\ntitle: W\n---\n甲·再改。\n", encoding="utf-8")
+        rc1 = _autocommit_main(["--repo", str(repo), "--inspect"])
+        check(rc1 == 1, "半成品巡检 rc 1（未闭合）")
+
     print("AUTO_COMMIT_TESTS:", "PASS" if ok else "FAIL")
     return ok
 

@@ -15,6 +15,7 @@ from .protocol import (DEFAULT_TIER, DEFAULT_TRUSTED_AGENTS, TIER_DIR,
                        safe_project_id, strip_frontmatter, title_token, unquote)
 from .engine import write_atomic
 from .audit import AuditBackend
+from .writer_contracts import baseline_trust_of
 
 
 def _parse_fm(text: str) -> dict:
@@ -38,6 +39,7 @@ def _parse_fm(text: str) -> dict:
     out["summary"] = get("summary")
     out["tier"] = get("memory_tier")
     out["source_agent"] = get("source_agent") or "workbuddy"
+    out["writer_id"] = get("writer_id")
     out["project_id"] = get("project_id")
     out["domain"] = get("domain")
     out["kind"] = get("kind")
@@ -79,9 +81,17 @@ def ingest(staging_dir: Path, mem_root: Path, tier_dirs: dict[str, str] | None,
         if tier not in tier_dirs:
             tier = DEFAULT_TIER
         source_agent = fm.get("source_agent") or "workbuddy"
-        # P0 写侧信任分层：可信任名单缺省仅 workbuddy；显式 trust 字段优先
+        writer_id = fm.get("writer_id")
+        # P0 写侧信任分层：显式 trust > writer_id 登记基线 > source_agent 名单兜底。
+        # source_agent 名单法无法区分 distill/staging 同源(workbuddy)的信任冲突，
+        # 故带 writer_id 的登记投稿一律以登记表 baseline_trust 为准。
         trusted = trusted_agents if trusted_agents is not None else DEFAULT_TRUSTED_AGENTS
-        trust = normalize_trust(fm.get("trust") or source_agent, trusted)
+        if fm.get("trust") is not None:
+            trust = normalize_trust(fm["trust"], trusted)
+        elif writer_id:
+            trust = normalize_trust(baseline_trust_of(writer_id), trusted)
+        else:
+            trust = normalize_trust(source_agent, trusted)
         note = Note(
             title=fm.get("title") or "untitled",
             summary=fm.get("summary") or "（无摘要）",
@@ -94,6 +104,8 @@ def ingest(staging_dir: Path, mem_root: Path, tier_dirs: dict[str, str] | None,
             body=strip_frontmatter(raw).strip(),
         )
         note.extra["trust"] = trust  # P0：信任档随 frontmatter 落盘（桥导出不透传）
+        if writer_id:
+            note.extra["writer_id"] = writer_id  # 溯源标签：登记表信任判定维度随稿落盘
         if fm.get("kind"):
             note.extra["kind"] = fm["kind"]
         token = title_token(note.title)

@@ -16,49 +16,56 @@ from typing import Callable, Iterable
 
 from .protocol import (TRUST_KNOWN, TRUST_UNKNOWN, TRUST_UNTRUSTED,
                        normalize_trust)
+from .writer_contracts import baseline_trust_of
 
 # 档位→排序权重：越小越优先。untrusted 权重最大（排最后）。
 _WEIGHT = {TRUST_KNOWN: 0, TRUST_UNKNOWN: 1, TRUST_UNTRUSTED: 2}
 
 
-def _scan_fm(path: Path) -> tuple[str | None, str | None]:
-    """单次读文件，解析首个 frontmatter 块内的 trust 与 source_agent 两字段。
+def _scan_fm(path: Path) -> tuple[str | None, str | None, str | None]:
+    """单次读文件，解析首个 frontmatter 块内的 trust / source_agent / writer_id。
 
     与 ingest 契约一致（行锚定、经 unquote 剥引号反 DQ 转义）。一次文件读
-    避免 trust_of_path 旧实现的双读（先 _fm_trust 再重扫 source_agent）。
-    返回 (trust, source_agent)，读不到/无 frontmatter 对应 None。
+    避免逐字段重复读。返回 (trust, source_agent, writer_id)，读不到对应 None。
     """
     try:
         txt = path.read_text(encoding="utf-8")
     except Exception:
-        return None, None
+        return None, None, None
     m = re.match(r"^---\s*\n(.*?)\n---", txt, re.S)
     if not m:
-        return None, None
+        return None, None, None
     fm = m.group(1)
     from .protocol import unquote
-    trust = source = None
+    trust = source = writer = None
     mm = re.search(r"(?m)^\s*trust\s*:\s*(.+)$", fm)
     if mm:
         trust = unquote(mm.group(1).strip())
     mm = re.search(r"(?m)^\s*source_agent\s*:\s*(.+)$", fm)
     if mm:
         source = unquote(mm.group(1).strip())
-    return trust, source
+    mm = re.search(r"(?m)^\s*writer_id\s*:\s*(.+)$", fm)
+    if mm:
+        writer = unquote(mm.group(1).strip())
+    return trust, source, writer
 
 
 def trust_of_path(md_path: str | Path, trusted: frozenset[str]) -> str:
-    """解析单条笔记的信任档：显式 trust 优先，否则按来源名单映射。
+    """解析单条笔记的信任档：显式 trust > writer_id 登记基线 > source_agent 名单。
 
-    规则（与方案 B 一致）：
-    - frontmatter 含 trust 字段 → 直接归一（显式覆盖来源映射）；
-    - 无 trust 字段 → 读 source_agent，在 trusted 名单内→trusted，否则 untrusted；
-    - 两者都无 → unknown（存量无标记保守回落）。
+    规则（与方案 B/P0 一致）：
+    - frontmatter 含 trust 字段 → 直接归一（显式覆盖一切来源判定）；
+    - 无 trust → 读 writer_id，按登记表 baseline_trust_of 取静态基线
+      （登记表是信任唯一权威源，source_agent 名单法无法区分 distill/staging 同源冲突）；
+    - 无 writer_id（存量/未登记）→ 回退 source_agent 名单映射，保持向后兼容；
+    - 都无 → unknown（无标记存量保守回落）。
     """
     path = Path(md_path)
-    trust, source = _scan_fm(path)
+    trust, source, writer = _scan_fm(path)
     if trust is not None:
         return normalize_trust(trust, trusted)
+    if writer:
+        return normalize_trust(baseline_trust_of(writer), trusted)
     if source is not None:
         return normalize_trust(source, trusted)
     return TRUST_UNKNOWN

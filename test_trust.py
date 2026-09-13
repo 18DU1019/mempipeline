@@ -113,6 +113,19 @@ def main() -> bool:
         f = root / "labelover.md"; f.write_text(
             "---\ntype: note\ntitle: F\nmemory_tier: medium\nimportance: 0.6\n"
             "source_agent: workbuddy\ntrust: unknown\n---\n\n正文己。\n", encoding="utf-8")
+        # 登记表权威（writer_id 覆盖 source_agent 名单）：
+        # g：source=workbuddy(名单内) 但 writer_id=staging_ingest(登记 untrusted) → untrusted
+        g = root / "stage.md"; g.write_text(
+            "---\ntype: note\ntitle: G\nmemory_tier: medium\nimportance: 0.6\n"
+            "source_agent: workbuddy\nwriter_id: staging_ingest\n---\n\n正文庚。\n", encoding="utf-8")
+        # h：source=social_ingest(名单外) 但 writer_id=distill_memory(登记 trusted) → trusted
+        h = root / "distill.md"; h.write_text(
+            "---\ntype: note\ntitle: H\nmemory_tier: medium\nimportance: 0.6\n"
+            "source_agent: social_ingest\nwriter_id: distill_memory\n---\n\n正文辛。\n", encoding="utf-8")
+        # i：未登记 writer_id → 回落 unknown（不误判档位）
+        i = root / "alien.md"; i.write_text(
+            "---\ntype: note\ntitle: I\nmemory_tier: medium\nimportance: 0.6\n"
+            "source_agent: workbuddy\nwriter_id: some_future_writer\n---\n\n正文壬。\n", encoding="utf-8")
         check(trust_of_path(a, _TRUSTED) == TRUST_KNOWN,
               "source_agent=workbuddy(默认名单) -> trusted")
         check(trust_of_path(b, _TRUSTED) == TRUST_UNTRUSTED,
@@ -127,6 +140,13 @@ def main() -> bool:
               "显式 trust 空值回落 source_agent=workbuddy -> trusted")
         check(trust_of_path(f, _TRUSTED) == TRUST_UNKNOWN,
               "显式 trust=unknown 覆盖可信来源 -> unknown")
+        # 登记表权威：writer_id 覆盖 source_agent 名单
+        check(trust_of_path(g, _TRUSTED) == TRUST_UNTRUSTED,
+              "writer_id=staging_ingest 覆盖 source=workbuddy(名单内) -> untrusted")
+        check(trust_of_path(h, _TRUSTED) == TRUST_KNOWN,
+              "writer_id=distill_memory 覆盖 source=social_ingest(名单外) -> trusted")
+        check(trust_of_path(i, _TRUSTED) == TRUST_UNKNOWN,
+              "未登记 writer_id 回落 unknown（不误判档位）")
 
     # ---- 4. ingest 写侧落盘：投稿 frontmatter 含 trust 档 ----
     print("== ingest 写侧 trust 落盘 ==")
@@ -149,16 +169,24 @@ def main() -> bool:
         (staging / "a" / "s3.md").write_text(
             "---\ntitle: 投稿C\nmemory_tier: medium\nsource_agent: workbuddy\ntrust: unknown\n---\n\n正文。\n",
             encoding="utf-8")
+        # 投稿4：无 trust、source=workbuddy(名单内) 但 writer_id=staging_ingest(登记 untrusted)
+        # → untrusted（登记表覆盖 source_agent 名单，同源冲突的权威裁决）
+        (staging / "a" / "s4.md").write_text(
+            "---\ntitle: 投稿D\nmemory_tier: medium\nsource_agent: workbuddy\nwriter_id: staging_ingest\n---\n\n正文。\n",
+            encoding="utf-8")
         a2 = _FA(p / "audit" / "log.md", p / "audit" / "man.json", mem)
         st = _ingest(staging, mem, None, a2)
         texts = {f.read_text(encoding="utf-8") for f in (mem / "02-中期记忆").glob("*.md")}
-        check(st["wrote"] == 3, f"ingest 写入 3 篇 wrote={st['wrote']}")
+        check(st["wrote"] == 4, f"ingest 写入 4 篇 wrote={st['wrote']}")
         check(any('trust: "trusted"' in t and "单写者A" in t for t in texts),
               "workbuddy 投稿 -> trust: trusted")
         check(any('trust: "untrusted"' in t and "投稿B" in t for t in texts),
               "social_ingest 投稿 -> trust: untrusted")
         check(any('trust: "unknown"' in t and "投稿C" in t for t in texts),
               "显式 trust=unknown -> trust: unknown")
+        check(any('trust: "untrusted"' in t and "投稿D" in t for t in texts) and
+              any('writer_id: "staging_ingest"' in t and "投稿D" in t for t in texts),
+              "writer_id=staging_ingest 落盘 trust: untrusted + 溯源 writer_id")
 
     # ---- 5. hybrid_recall 信任降权开关冒烟（纯 TF-IDF 路径，trust_rank=True） ----
     print("== hybrid_recall trust_rank 开关冒烟 ==")

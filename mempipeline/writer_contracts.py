@@ -14,6 +14,16 @@
 `governable`：该写者笔记的治理候选（supersede/archive 等）是否允许产生建议。
 distill_memory（TRAE 单方镜像，人工策展）可治理；staging_ingest（WorkBuddy 源
 投稿，外部内容，尊重不覆灭他人稿红线）默认不可治理。
+
+`baseline_trust`：该写者信任档的**静态基线**（trusted / unknown / untrusted，
+对齐 protocol.TRUST_* 三档），是写侧信任分层（P0 方案 B）的登记层落点。
+信任模型 `信任 = min(基线, 观测置信)` 中的基线在此声明；观测置信来自
+`confidence_*` 字段，动态聚合在读取/仲裁侧（本模块只存静态基线，不判观测）。
+诚实边界：基线是出自身声明的静态档，非观测证据、非防伪证明。
+⚠ 命名空间错位：本表键是 writer_id（如 distill_memory），而信任归一
+`normalize_trust` 的名单匹配的是 source_agent（如 workbuddy，非同一值）。
+消费端联调时须明确「writer_id ↔ trust 匹配名」的映射，勿直接拿 writer_id
+当 source_agent 名单喂 normalize_trust。
 """
 from __future__ import annotations
 
@@ -27,12 +37,14 @@ WRITER_CONTRACTS: dict[str, dict[str, Any]] = {
         "allowed_tiers": {"long", "medium"},
         "project_scope": "family",   # 项目约束/会话族须带 project_id；用户画像族禁带
         "governable": True,
+        "baseline_trust": "trusted",   # 单写者蒸馏主链，唯一默认高信任基线
     },
     # staging_ingest：WorkBuddy 源投稿，外部内容，默认**不可**被治理建议覆盖
     "staging_ingest": {
         "allowed_tiers": {"medium"},
         "project_scope": "optional",  # project_id 源带则透传，不带不强行
         "governable": False,
+        "baseline_trust": "untrusted",   # 外部投稿未信任来源，观测建立后再升档
     },
     # robot-vision：具身机器人观测投稿。感知稿天然短时效 → 只写中期；语义归属 → 强制
     # 项目族 project_id；可治理 → 允许被 supersede/archive 建议覆盖（观测可证伪）。
@@ -42,12 +54,15 @@ WRITER_CONTRACTS: dict[str, dict[str, Any]] = {
         "allowed_tiers": {"medium"},      # 观测稿短时效，不染指长期层
         "project_scope": "family",        # 必须带 project_id（语义归属，独立证据聚合不自生效）
         "governable": True,               # 可被建议覆盖，最终执行仍在人类
+        "baseline_trust": "unknown",      # 观测置信未建立前保守回落 unknown，动态聚合在读取侧
     },
 }
 
 # 兜底契约：allowed_tiers 用 frozenset 不可变，杜绝读侧误改污染（dict(_DEFAULT) 浅拷贝
 # 只隔离外层 dict，set 值若不冻结则仍是共享可变引用；契约表只读，冻结即正确形态）。
-_DEFAULT = {"allowed_tiers": frozenset(), "project_scope": "optional", "governable": False}
+# baseline_trust 兜底为 "unknown"：未登记写者保守回落未知档，不误判为 trusted/untrusted。
+_DEFAULT = {"allowed_tiers": frozenset(), "project_scope": "optional", "governable": False,
+            "baseline_trust": "unknown"}
 
 # frontmatter 块与字段读取（与 governance._FM_RE / timegrap 同构）
 _FM_RE = re.compile(r"(?m)^---\s*\n(.*?)\n---\s*\n?", re.S)
@@ -123,3 +138,14 @@ def check_contract(text: str, *, stem: str | None = None) -> list[str]:
 def non_governable_writers() -> set[str]:
     """返回 governable=False 的写者集合（供治理候选过滤注入）。"""
     return {w for w, c in WRITER_CONTRACTS.items() if not c.get("governable", True)}
+
+
+def baseline_trust_of(writer_id: str) -> str:
+    """读某写者的静态信任基线（trusted / unknown / untrusted，对齐 protocol.TRUST_*）。
+
+    返回登记表声明的 baseline_trust；未登记写者回落 _DEFAULT 的 "unknown"。
+    只读纯查询，服务于写侧信任分层（P0）的登记层取值。注意：返回值是静态基线，
+    不含观测置信的动态聚合——完整 `信任 = min(基线, 观测置信)` 在读取/仲裁侧实现。
+    """
+    c = WRITER_CONTRACTS.get(writer_id, _DEFAULT)
+    return c.get("baseline_trust", "unknown")

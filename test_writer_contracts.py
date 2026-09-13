@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from mempipeline.writer_contracts import (
-    check_contract, writer_of, non_governable_writers,
+    check_contract, writer_of, non_governable_writers, baseline_trust_of,
 )
 from mempipeline.governance import scan_stale_notes
 
@@ -129,6 +129,18 @@ def main() -> bool:
     ng = non_governable_writers()
     check("staging_ingest" in ng and "distill_memory" not in ng,
           f"staging 不可治理、distill 可治理（ng={ng}）")
+
+    # ---- 2b. baseline_trust（登记层信任源） ----
+    print("== baseline_trust 静态信任基线 ==")
+    check(baseline_trust_of("distill_memory") == "trusted",
+          "distill_memory 主链基线 trusted")
+    check(baseline_trust_of("staging_ingest") == "untrusted",
+          "staging_ingest 外部投稿基线 untrusted")
+    check(baseline_trust_of("robot-vision") == "unknown",
+          "robot-vision 观测置信未建立前回落到 unknown")
+    check(baseline_trust_of("some_future_writer") == "unknown",
+          "未登记写者回落 unknown（不误判信任档）")
+    check(baseline_trust_of("") == "unknown", "空 writer_id 回落 unknown")
 
     # ---- 3. governance 过滤 ----
     print("== governance 过滤 ==")

@@ -163,6 +163,31 @@ def transition(note_path: Path, to_state: str, audit: AuditBackend,
     """状态迁移：校验合法 → 改 frontmatter status → write_atomic 写回（幂等+审计）。
 
     返回 (status, from_state)。rejected/archived 为软标记：文件保留，零删除。
+
+    ⚠️ 调用方式现状（2026-09-14 审查实测，人工裁决留档）
+    ---------------------------------------------------------------
+    本函数目前**一律由人工/agent 显式指定 to_state 调用**，系统中没有任何
+    自动产出 candidate 的路径。实测：镜像 235 篇 status 全为 active，
+    candidate 队列恒 0，非活跃占比 0.0%（周报 ③ 节连续标记此异常）。
+
+    这是**有意保留的现状**，非接线遗漏。理由：审查未发现"该流转却被卡住"
+    的实例——235 篇中没有一篇因缺少流转而失活。在根因不明时启用自动评分，
+    只会凭空生产 candidate 增加人工审核负担，属负收益。
+
+    若未来决定启用自动评分，须先满足下面三个前提，且**按顺序**执行：
+      1. 先确认候选来源：启用后 candidate 会从哪里产生？只能是
+         `scan_stale_notes()` 的候选清单（已有打分）或新增写者侧钩子。
+         前者是纯时间衰减，后者需改 writer_contracts。
+      2. 先确认审核容量：candidate 是给人看的队列，若无人定期处理，
+         队列只增不减，与"零流量"相比是更糟的状态（堆积而非闲置）。
+      3. 先小样本试运行：对 scan_stale_notes 命中且 score < 阈值 的少数几篇
+         （建议 <= 5 篇）手工调 transition(..., "candidate") 观察一周，
+         确认人能消化再考虑脚本化。
+
+    启用方式（当前未启用，勿直接抄）：在 weekly_health.py 的 stale_scan 之后
+    加一段对候选清单的批量 transition，并把 source 设为 "weekly" 以在审计中
+    可区分自动化来源。注意 transition 会对每篇调 write_atomic，批量执行有
+    写放大，且需 oq_lock 同款单写者保护——**这是它未被默认启用的第二个原因**。
     """
     if to_state not in STATES:
         return "invalid_target", ""

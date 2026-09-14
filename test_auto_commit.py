@@ -7,6 +7,7 @@
 2. commit —— 精确路径限定本地提交成功；绝不调用 push（无 --dry-run 额外副作用）。
 3. main dry-run —— 只判定不提交（返回 0，HEAD 不变）。
 """
+import os
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
+
+# pre-commit 下运行时的隔离修复（2026-09-14 实测假红根因）：git 钩子会给子进程
+# 注入 GIT_DIR / GIT_INDEX_FILE 等环境变量，沙盒临时仓库的 git 命令会被其劫持到
+# 真实仓库索引上（如"空暂存"读到真实暂存区），测试必假红。测试进程内统一剥离。
+for _k in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX",
+           "GIT_OBJECT_DIR", "GIT_COMMON_DIR"):
+    os.environ.pop(_k, None)
 
 from mempipeline.auto_commit import semantic_closure, commit, \
     main as _autocommit_main

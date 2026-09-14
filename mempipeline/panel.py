@@ -356,6 +356,7 @@ class _Handler(BaseHTTPRequestHandler):
     semantic_index: object | None = None
     tfidf_index: object | None = None  # TF-IDF 倒排快路径（MemoryRecall 注入）
     audit: object | None = None  # 真实 AuditBackend（面板晋升写审计）
+    access_log: object | None = None  # P1 曝光 sidecar（AccessLog 实例，None=不打点）
     trust_rank: bool = False  # P0 信任降权开关（默认关，保持既有召回行为）
     _trusted: frozenset[str] = None  # 缺省在 _trust_of 内取 DEFAULT_TRUSTED_AGENTS
 
@@ -403,6 +404,13 @@ class _Handler(BaseHTTPRequestHandler):
                     res = self._tfidf(q, k, proj)
             else:
                 res = self._tfidf(q, k, proj)
+            # P1 曝光打点（AMV-P1）：面板搜索是人真正看到结果的唯一出口，
+            # 只记这里；golden/内部扫描不算曝光。sidecar 失败不阻断响应。
+            if self.access_log is not None:
+                try:
+                    self.access_log.record([p for p, _ in res], source="panel_search")
+                except Exception:
+                    pass
             _json(self, [{"path": p, "score": round(s, 4)} for p, s in res])
         elif path == "/api/browse":
             page = int(qs.get("page", ["1"])[0])
@@ -472,13 +480,21 @@ def serve(mem_root: Path, audit_log: Path | None = None,
           index: object | None = None, port: int = 8790,
           host: str = "127.0.0.1",
           audit: object | None = None,
-          tfidf_index: object | None = None) -> None:
-    """起面板服务（仅本机）。Ctrl+C 停止。"""
+          tfidf_index: object | None = None,
+          access_log_db: Path | None = None) -> None:
+    """起面板服务（仅本机）。Ctrl+C 停止。
+
+    access_log_db：P1 曝光 sidecar 的 SQLite 路径（None=不打点，行为同旧版）。
+    """
     _Handler.mem_root = mem_root
     _Handler.audit_log = audit_log
     _Handler.semantic_index = index
     _Handler.tfidf_index = tfidf_index
     _Handler.audit = audit
+    _Handler.access_log = None
+    if access_log_db is not None:
+        from .access_log import AccessLog
+        _Handler.access_log = AccessLog(Path(access_log_db))
     srv = ThreadingHTTPServer((host, port), _Handler)
     print(f"mempipeline 面板: http://{host}:{port}/  (mem_root={mem_root})")
     try:
@@ -496,6 +512,8 @@ def main(argv=None) -> int:
     p.add_argument("--audit-log", default=None, help="审计日志路径（可选）")
     p.add_argument("--index-db", default=None, help="语义索引 SQLite（可选）")
     p.add_argument("--tfidf-db", default=None, help="TF-IDF 倒排索引 SQLite（可选，P1-A2 快路径）")
+    p.add_argument("--access-log-db", default=None,
+                   help="P1 曝光 sidecar SQLite（可选；缺省不打点，生产由 launch_panel 注入）")
     p.add_argument("--port", type=int, default=8790)
     a = p.parse_args(argv)
     idx = None
@@ -512,7 +530,8 @@ def main(argv=None) -> int:
                           Path(a.audit_log).with_suffix(".manifest.json"),
                           Path(a.mem_root))
     serve(Path(a.mem_root), Path(a.audit_log) if a.audit_log else None,
-          idx, port=a.port, audit=audit, tfidf_index=tidx)
+          idx, port=a.port, audit=audit, tfidf_index=tidx,
+          access_log_db=Path(a.access_log_db) if a.access_log_db else None)
     return 0
 
 

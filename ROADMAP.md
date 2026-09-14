@@ -50,15 +50,15 @@
 
 ## 质量门禁（已启用）
 
-- pre-commit 三段：语法检查 + 隐私驻点（硬编码绝对路径/内联密钥，占位符白名单）+ 冒烟测试。
-- 6 套测试（timegrap / governance / mempipeline / bridge / semantic / panel）+ py_compile。
+- pre-commit 三段：语法检查 + 隐私驻点（硬编码绝对路径/内联密钥，占位符白名单）+ 全量测试与覆盖率门禁（`coverage_gate.py`，floor 80%，2026-09-14 起替代原单文件冒烟）。
+- 12 套测试（timegrap / governance / mempipeline / bridge / semantic / panel / act / auto_commit / evolution / trust / writer_contracts / access_log）+ py_compile。
 - 开源 SOP 基线：config.example.py 占位符，config.py 经`.gitignore`排除，零硬编码路径。
 
 ## 当前状态
 
-- 版本 0.7.0；GitHub master 已同步 + Release 已建。
+- 版本 0.7.0；GitHub 通道不可用（TLS 中断，环境问题），本地 master 领先 origin/master(`5c0c3cf`) 23 提交，离线交付以 git bundle 为准（见运行台备份惯例），不反复重试 push。
 - 已闭环：P1（自动化审计）、P2（时间维度图谱）、P3（自我进化闭环 3/3：③ 时间图谱信号使入治理 fab1feb / ① golden 全层级回归基线 086086a / ② Act 人类触发建议面 18121cd）。
-- 待办：验证信号（候选清单误报率 / 跨轮次脉络连续性）待跨轮次运行积累样本后定稿；无其他 TODO 挂点。
+- 待办：验证信号（候选清单误报率 / 跨轮次脉络连续性）待跨轮次运行积累样本后定稿；P1 曝光信号（access_log sidecar）升格为治理因子与否，待数周分布数据裁决；RecallService 门面挂触发线（第 4 读侧路径 / B 轨接入）。
 
 ### P3.5 纯增量加固（2026-09-12，A+B 段全做）
 
@@ -184,6 +184,23 @@
 - 全套件回归绿
 
 **完整规格**见 `DESIGN-REDACT.md`。**落码状态（2026-09-13）**：软终态 + recall 两路检索切断 + timegrap 信号排除 + 软/硬脱敏 + 审计轨迹 + 展示收敛（panel /api/browse 剔除 redacted）＋ 语义层剔除（SemanticIndex.build 删 emb 向量 + gen 换代令 qres 失效），全套件 7 passed。P3.12 至此全量落码；剩余边界仅 git 层历史泄漏（独立于本文档，见 §7·B）。
+
+### P3.13 架构债整改轮（三候选线论证 v2 落地，2026-09-14）
+
+**缘起**：09-13 裁决"P1 召回未曝光度优先开工"后被岔开未落地；ARCHITECTURE §5 债表自写"已到拆分阈值"与"观测期不新开工"姿态互挤。本轮走 three-ruler-review 三候选线论证 + 联网查漏补缺（v2 报告留档 `_agent运行台\输出\mempipeline-三候选线论证与联网查漏补缺-2026-09-14.md`），按 v2 建议落码三件：
+
+| 编号 | 内容 | 落点 | commit |
+|------|------|------|--------|
+| N1 | **P1 曝光打点（sidecar，只记录不消费）**：`access_log.AccessLog`（SQLite 流水，path+ts+source）；唯一记录点=panel `/api/search`（人真正看到结果的出口），golden/内部扫描不算曝光；**不写 frontmatter**（防 mtime 污染时间基准 + 破坏读侧只读 + 召回反馈回路三重风险，对齐 AWS lifecycle 独立表 / GA recency 查询时计算）；不进 score_note，升格与否待数周分布裁决 | `mempipeline/access_log.py` + `panel.py` | `3136888` |
+| N2 | **governance 按职责拆包**：`_state`（状态机/红act/队列/vault）/`_score`（打分策略/TIER_POLICY）/`_scan`（候选扫描/信号合并）/`_health`（健康快照），`__init__` re-export 外部 API 零变化；判据=职责耦合非行数；timegrap/panel 实测内聚度达标不立项 | `mempipeline/governance/` | `56f26fe` |
+| N4 | **覆盖率门禁（P3 债清偿）**：`coverage_gate.py` 逐自运行测试累积 coverage（pytest --cov 单独跑低估至 40%，弃用），TOTAL floor=80%、基线 85%、只准升不准降；接入 pre-commit 替代单文件冒烟 | `coverage_gate.py` + `.githooks/pre-commit` | `56f26fe` |
+| N3 | **三路召回债重命名**："收敛为单路"经联网四源（InfoQ/Azure 等）判定逆共识——生产级 RAG 共识恰是多路+RRF，砍单路还拆掉 lexical 无 Ollama 降级护栏；债改为「读侧门面（RecallService）缺失」，触发线=第 4 读侧路径或 B 轨接入，缓行 | `ARCHITECTURE.md` §5 + 本节 | 本次 |
+
+**验收**：12 套测试全绿（新增 `test_access_log.py` 17 断言：单元/面板集成/打点件故障不阻断/golden 不产曝光口径护栏）；覆盖率 85%≥floor 80%；golden 回归命中率 1.000 不变；外部 API（panel/bridge/weekly_health/test 的 governance import 面）零改动。
+
+**N5（不立项）**：staging_ingest project_id 覆盖率 2% 为 legacy 存量非新增劣化，E3 探针已盯，继续观测。
+
+**推荐下一候选**：无新开工。P1 曝光信号随周检积累数周分布后裁决升格；RecallService 门面挂触发线；进入观测期。
 
 ---
 生成：ROADMAP v0.2（2026-09-12 联网复核并规划 D 段）。拟议阶段非既定计划。

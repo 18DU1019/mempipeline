@@ -23,7 +23,7 @@ Generative Agents recency 查询时计算——访问态不落内容 frontmatter
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -83,3 +83,20 @@ class AccessLog:
         """source -> 事件数（观测自动化流量是否误入，口径自检用）。"""
         return {s: n for s, n in self._conn.execute(
             "SELECT source, COUNT(*) FROM exposure GROUP BY source")}
+
+    def distribution(self, days: int = 7) -> dict:
+        """近 days 天曝光分布（升格裁决的观测面，只读，不进评分链路）。
+
+        返回 {since, total, distinct, top}：total=事件数、distinct=被曝光笔记数、
+        top=按次数降序前 10 条 (path, n)。ts 为定宽 ISO 串，字典序即时间序，
+        字符串比较安全。
+        """
+        since = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+        total, distinct = self._conn.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT path) FROM exposure WHERE ts >= ?",
+            (since,)).fetchone()
+        top = self._conn.execute(
+            "SELECT path, COUNT(*) FROM exposure WHERE ts >= ? "
+            "GROUP BY path ORDER BY COUNT(*) DESC, path LIMIT 10",
+            (since,)).fetchall()
+        return {"since": since, "total": total, "distinct": distinct, "top": top}

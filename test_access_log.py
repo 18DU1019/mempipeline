@@ -39,6 +39,10 @@ def _test_unit(tmp: Path, check) -> None:
     check(al.last_seen(p3) is None, "last_seen 缺省 None")
     check(al.unexposed([p1, p2, p3]) == [p3], "unexposed 只含从未曝光者")
     check(al.sources() == {"panel_search": 3}, "sources 口径自检")
+    d = al.distribution(days=7)
+    check(d["total"] == 3 and d["distinct"] == 2, f"distribution 聚合（{d['total']}/{d['distinct']}）")
+    check(d["top"][0] == (p1, 2), "distribution top 按次数降序")
+    check(al.distribution(days=-1)["total"] == 0, "窗口起点在未来时无事件")
     al.close()
     # 重开持久化验证
     al2 = AccessLog(tmp / "acc.db")

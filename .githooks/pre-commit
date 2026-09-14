@@ -42,6 +42,6 @@ PYEOF
 else
   echo "（无暂存文件，跳过）"
 fi
-echo "=== [pre-commit] 冒烟测试 ==="
-"$PY" test_panel.py || { echo "❌ 测试失败"; exit 1; }
+echo "=== [pre-commit] 全量测试 + 覆盖率门禁（架构债 P3，floor 80%）==="
+"$PY" coverage_gate.py || { echo "❌ 测试或覆盖率门禁失败"; exit 1; }
 echo "PRE_COMMIT_PASSED"

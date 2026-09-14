@@ -194,7 +194,7 @@
 | N1 | **P1 曝光打点（sidecar，只记录不消费）**：`access_log.AccessLog`（SQLite 流水，path+ts+source）；唯一记录点=panel `/api/search`（人真正看到结果的出口），golden/内部扫描不算曝光；**不写 frontmatter**（防 mtime 污染时间基准 + 破坏读侧只读 + 召回反馈回路三重风险，对齐 AWS lifecycle 独立表 / GA recency 查询时计算）；不进 score_note，升格与否待数周分布裁决 | `mempipeline/access_log.py` + `panel.py` | `3136888` |
 | N2 | **governance 按职责拆包**：`_state`（状态机/红act/队列/vault）/`_score`（打分策略/TIER_POLICY）/`_scan`（候选扫描/信号合并）/`_health`（健康快照），`__init__` re-export 外部 API 零变化；判据=职责耦合非行数；timegrap/panel 实测内聚度达标不立项 | `mempipeline/governance/` | `56f26fe` |
 | N4 | **覆盖率门禁（P3 债清偿）**：`coverage_gate.py` 逐自运行测试累积 coverage（pytest --cov 单独跑低估至 40%，弃用），TOTAL floor=80%、基线 85%、只准升不准降；接入 pre-commit 替代单文件冒烟 | `coverage_gate.py` + `.githooks/pre-commit` | `56f26fe` |
-| N3 | **三路召回债重命名**："收敛为单路"经联网四源（InfoQ/Azure 等）判定逆共识——生产级 RAG 共识恰是多路+RRF，砍单路还拆掉 lexical 无 Ollama 降级护栏；债改为「读侧门面（RecallService）缺失」，触发线=第 4 读侧路径或 B 轨接入，缓行 | `ARCHITECTURE.md` §5 + 本节 | 本次 |
+| N3 | **三路召回债重命名**："收敛为单路"经联网四源（InfoQ/Azure 等）判定逆共识——生产级 RAG 共识恰是多路+RRF，砍单路还拆掉 lexical 无 Ollama 降级护栏；债改为「读侧门面（RecallService）缺失」，触发线=第 4 读侧路径或 B 轨接入，缓行 | `ARCHITECTURE.md` §5 + 本节 | `be585b1` |
 
 **验收**：12 套测试全绿（新增 `test_access_log.py` 17 断言：单元/面板集成/打点件故障不阻断/golden 不产曝光口径护栏）；覆盖率 85%≥floor 80%；golden 回归命中率 1.000 不变；外部 API（panel/bridge/weekly_health/test 的 governance import 面）零改动。
 

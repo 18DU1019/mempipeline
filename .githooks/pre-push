@@ -1,0 +1,63 @@
+#!/bin/bash
+# pre-push 门禁（开源 SOP 阶段2）：对即将推送的提交做密钥/隐私扫描 + 提交者身份校验
+# 范围：远端已有提交用 remote_sha..local_sha；新分支用 rev-list --not --remotes 取未推送提交集合
+# 身份门禁：作者/提交者邮箱不得为个人邮箱（须用 GitHub noreply），防个人身份外泄到公开仓库
+# 显式逃生口：ALLOW_INSECURE_PUSH=1 git push ...（显式放行，不静默；对齐 KB_ALLOW_MIXED 惯例）
+PY="${PYTHON:-<venv-python>}"  # 默认真实解释器；可用环境变量 PYTHON 覆盖
+if [ "${ALLOW_INSECURE_PUSH:-0}" = "1" ]; then
+  echo "=== [pre-push] ALLOW_INSECURE_PUSH=1 显式放行，跳过扫描 ==="
+  exit 0
+fi
+
+all_commits=""
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # 删除远端分支：无内容推送，跳过
+  [ "$local_sha" = "0000000000000000000000000000000000000000" ] && continue
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    # 新分支：只取不在任何远端上的提交
+    all_commits="$all_commits $(git rev-list "$local_sha" --not --remotes 2>/dev/null)"
+  else
+    all_commits="$all_commits $(git rev-list "$remote_sha..$local_sha" 2>/dev/null)"
+  fi
+done
+# 去重；全空则无事可扫
+all_commits=$(echo $all_commits | tr ' ' '\n' | sort -u | tr '\n' ' ')
+if [ -z "$(echo $all_commits | tr -d ' ')" ]; then
+  exit 0
+fi
+echo "=== [pre-push] 待推送提交 $(echo $all_commits | wc -w) 个：密钥/隐私扫描 + 身份校验 ==="
+
+# shellcheck disable=SC2086
+"$PY" - $all_commits <<'PYEOF'
+import re, subprocess, sys
+
+shas = sys.argv[1:]
+sec = re.compile(r"""(?i)\b(token|api[_-]?key|secret|password|passwd|auth)\b\s*[=:]\s*["']([^"'\r\n]{12,})["']""")
+tok = re.compile(r"sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|gho_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16}|xox[bp]-[A-Za-z0-9-]{10,}")
+key = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+private_mail = re.compile(r"(?i)@qq\.com")
+
+hits = 0
+for sha in shas:
+    body = subprocess.run(
+        ["git", "show", "--format=fuller", "--patch", "--no-color", sha],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    ).stdout
+    for ln in body.splitlines():
+        if tok.search(ln) or key.search(ln):
+            print(f"[pre-push] 高危命中 {sha[:8]}: {ln.strip()[:120]}")
+            hits += 1
+        elif sec.search(ln):
+            print(f"[pre-push] 凭据赋值命中 {sha[:8]}: {ln.strip()[:120]}")
+            hits += 1
+        if ln.startswith("Author:") or ln.startswith("Commit:"):
+            if private_mail.search(ln):
+                print(f"[pre-push] 身份门禁 {sha[:8]}: {ln.strip()}（个人邮箱禁止推送，须用 GitHub noreply）")
+                hits += 1
+
+if hits:
+    print(f"❌ [pre-push] {hits} 处命中，推送已拦截。修复后重推；确需放行: ALLOW_INSECURE_PUSH=1 git push ...")
+    sys.exit(1)
+print("=== [pre-push] 扫描通过 ===")
+PYEOF
+exit $?

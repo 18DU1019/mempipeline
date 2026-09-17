@@ -120,6 +120,7 @@ class MemoryRecall(RecallBackend):
                  projects: Iterable[str] | None = None,
                  index: "TFIDFIndex | None" = None):
         self.mem_root = mem_root
+        self.read_errors: int = 0  # G 项（2026-09-17）：读失败累计——静默缺席候选的条目在此显形
         if tiers is None:
             from .protocol import TIER_DIR
             tiers = TIER_DIR.values()
@@ -169,6 +170,7 @@ class MemoryRecall(RecallBackend):
                     try:
                         txt = md.read_text(encoding="utf-8")
                     except Exception:
+                        self.read_errors += 1  # G 项：计数不改变行为（缺席语义不变）
                         continue
                     if is_redacted(txt):
                         continue  # P3.12 红act：不进候选、不打分、不进 Top-K
@@ -209,6 +211,7 @@ class TFIDFIndex:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self.last_vacuum: list[str] = []  # F-vacuum：最近一次 build() 清除的幽灵路径清单（供调用方打印）
+        self.last_read_errors: int = 0  # G 项（2026-09-17）：最近一次 build() 读失败计数
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         # schema 演进迁移（A3 ASI06）：旧版 DB 的 doc 表可能缺 ckey 列，
         # CREATE TABLE IF NOT EXISTS 不会补列，导致 UNIQUE INDEX 建崩。
@@ -247,6 +250,7 @@ class TFIDFIndex:
         if tiers is None:
             tiers = TIER_DIR.values()
         _norm = norm or _default_norm
+        self.last_read_errors = 0  # G 项：每轮 build 重置读失败计数
         known = {r[0] for r in self._conn.execute("SELECT path FROM doc")}
         known_ckeys = {r[0] for r in self._conn.execute(
             "SELECT ckey FROM doc WHERE ckey IS NOT NULL")}
@@ -268,6 +272,7 @@ class TFIDFIndex:
                     try:
                         txt = md.read_text(encoding="utf-8")
                     except Exception:
+                        self.last_read_errors += 1  # G 项：计数不改变行为
                         continue
                     if is_redacted(txt):
                         if str(md) in known:

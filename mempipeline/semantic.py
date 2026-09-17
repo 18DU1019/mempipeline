@@ -97,6 +97,7 @@ class SemanticIndex:
 
     def __init__(self, db_path: Path):
         self.db_path = db_path
+        self.last_read_errors: int = 0  # G 项（2026-09-17）：最近一次 build() 读失败计数
         # check_same_thread=False：面板走 ThreadingHTTPServer，每个请求一个
         # 线程，索引连接须可跨线程使用（sqlite3 连接自带上锁，安全）
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
@@ -149,6 +150,7 @@ class SemanticIndex:
         if tiers is None:
             tiers = TIER_DIR.values()
         embed_fn = embed_fn or embed
+        self.last_read_errors = 0  # G 项：每轮 build 重置读失败计数
         if embed_fn is embed:
             known = {r[0] for r in self._conn.execute("SELECT path FROM emb")}
         else:
@@ -161,6 +163,7 @@ class SemanticIndex:
                     try:
                         txt = md.read_text(encoding="utf-8")
                     except Exception:
+                        self.last_read_errors += 1  # G 项：计数不改变行为
                         continue
                     if is_redacted(txt):
                         drop_paths.add(str(md))

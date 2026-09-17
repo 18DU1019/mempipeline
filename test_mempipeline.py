@@ -476,10 +476,58 @@ def test_tfidf_vacuum():
         raise AssertionError("test_tfidf_vacuum: 子断言失败")
 
 
+def test_g_error_visibility():
+    """二期 G 项（2026-09-17）验收：数据读路径静默丢失显形（计数上报）。
+
+    坏编码文件进镜像后：召回/索引的正常候选不受影响（行为不变），
+    但 read_errors / last_read_errors 计数 > 0（可见性达成）。
+    """
+    ok = True
+
+    def check(cond: bool, msg: str):
+        nonlocal ok
+        tag = "PASS" if cond else "FAIL"
+        print(f"  [{tag}] {msg}")
+        if not cond:
+            ok = False
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem_root = tmp / "mem"
+        (mem_root / "02-中期记忆").mkdir(parents=True)
+        (mem_root / "02-中期记忆" / "会话-正常-1111.md").write_text(
+            "---\ntype: note\ntitle: 正常\nsummary: 正常稿\n"
+            "memory_tier: medium\n---\n\n正常稿：定投纪律要点。\n", encoding="utf-8")
+        # 坏编码文件（非法 utf-8 字节序列）
+        (mem_root / "02-中期记忆" / "会话-坏编码-2222.md").write_bytes(
+            b"---\ntitle: bad\n---\n\n\xff\xfe\xff invalid bytes\n")
+
+        base = MemoryRecall(mem_root)
+        check(base.read_errors == 0, "初始 read_errors=0")
+        hits = base.recall("定投 纪律", k=5)
+        check(len(hits) == 1 and Path(hits[0][0]).name.startswith("会话-正常"),
+              "坏编码条目缺席、正常候选不受影响（行为不变）")
+        check(base.read_errors == 1, f"全扫读失败计数=1 (实得 {base.read_errors})")
+        hits2 = base.recall("定投 纪律", k=5)
+        check(base.read_errors == 2, f"累计语义：第二次 recall 后=2 (实得 {base.read_errors})")
+
+        idx = TFIDFIndex(tmp / "gvis.db")
+        built = idx.build(mem_root)
+        check(built == 1, f"索引只收正常稿 (built={built})")
+        check(idx.last_read_errors == 1, f"倒排 build 读失败计数=1 (实得 {idx.last_read_errors})")
+        added = idx.build(mem_root)
+        check(idx.last_read_errors == 1, f"每轮重置：增量 build 仍=1 (实得 {idx.last_read_errors})")
+        idx.close()
+    print("\nG ERROR VISIBILITY (2026-09-17):", "ALL PASS" if ok else "SOME FAILED")
+    if not ok:
+        raise AssertionError("test_g_error_visibility: 子断言失败")
+
+
 if __name__ == "__main__":
     _ok = main()
     for _fn in (test_crash_recover_sidecar, test_tfidf_recall, test_recall_golden,
-                test_project_isolation, test_tfidf_index, test_tfidf_vacuum):
+                test_project_isolation, test_tfidf_index, test_tfidf_vacuum,
+                test_g_error_visibility):
         try:
             _fn()
         except AssertionError as _e:

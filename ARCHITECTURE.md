@@ -74,7 +74,7 @@
 | P2 | 上帝模块 **部分清偿（2026-09-14）** | ~~governance 混职责~~ → 已按职责拆包（`_state`/`_score`/`_scan`/`_health`，`__init__` re-export 外部 API 零变化，12 套测试全绿+覆盖率 85% 门禁兜底）。**拆分判据=职责耦合非行数**。timegrap(397) 键/图/信号共享数据结构、内聚度实测高于原评估，panel 已有 panel_ops 先例——剩余两模块不立项，功能扩张致耦合上升时按同款"零行为变化"口径再拆 |
 | P2 | 多键协调 | subject_key（文件名正则）/ project_id（权威）/ writer_id（溯源）三键，机器人稿件须带稳定 project_id 否则主题簇碎裂 |
 | P2 | ~~TFIDFIndex 无 vacuum~~ **已清偿（2026-09-17，二期 F 项）** | 质检发现：`build()` 仅剔除 redacted 路径，物理删除/外迁的镜像文件留幽灵索引路径，快路径召回返回已不存在文件。修复=build() 收集「父目录落在本轮扫描范围」的失存已知路径，与红act剔除同批 DELETE+一次 commit（原子），清单显式落 `self.last_vacuum` 供调用方打印（范围外路径保守不动防 mem_root 变更误清）；返回值仍为 int（新增索引数），6 处调用方零破坏。验收测试 test_mempipeline.test_tfidf_vacuum（删除场景 0 幽灵命中 + 清单正确 + 越界保守） |
-| P2 | 静默异常吞噬面（2026-09-17 全链路质检登记） | 包体 17 处 `except Exception: pass/continue`（ruff BLE001/S110/S112）：recall 读文件失败该条静默缺席候选、无计数无日志——数据管线的静默丢失风险，坏了不知道坏。二期 G 项收敛（只加可见性不改行为） |
+| P2 | ~~静默异常吞噬面~~ **已清偿（2026-09-17，二期 G 项，销号表=§8.2）** | 质检登记时估 17 处，立项前 ruff 精确实盘 **36 处**（BLE001/S110/S112 去重）。收敛 4 处数据读路径（recall.py :171/:270 → read_errors/last_read_errors 计数、semantic.py :163 → last_read_errors、_health.py :37 → 报告 dict 增 read_errors key），计数不改行为（缺席语义不变）；保留 32 处（展示/解析/请求层兜底，逐条理由见 §8.2）。验收测试 test_mempipeline.test_g_error_visibility（坏编码条目缺席但计数显形，正常候选不受影响） |
 | P3 | ~~无覆盖率门禁~~ **已清偿（2026-09-14）** | 立 `coverage_gate.py`（逐自运行测试累积 coverage；pytest --cov 单独跑会低估至 40%，故不用之），TOTAL floor=80%、基线实测 85%，已接入 `.githooks/pre-commit` 替代原单文件冒烟。只准升不准降，改阈值须连带改 docstring 裁决日期 |
 
 ## 6. 具身机器人接入接缝（分域）
@@ -118,3 +118,24 @@
 |---|---|---|---|---|
 | F 索引 vacuum | `TFIDFIndex.build()` 对 `known` 集合中已不存在于镜像的路径执行清除（对齐既有 redacted 剔除分支的形态），产出清除清单供调用方打印 | 公司机 A | 索引是可重算派生数据，但清除必须显式可见（清单返回/打印，不静默）；**建议排在 D 项实施前**——D 同步会放大幽灵路径影响面；同义归一快路径（`_norm` 非空时 build 跳过既有文档）语义不受影响 | 构造「索引后删文件再 build」场景：快路径 0 幽灵命中 + 清除清单正确；12 套测试全绿，coverage ≥ 80 |
 | G 异常吞噬面收敛 | 逐处盘点包体 17 处 `except Exception`（recall/semantic/governance 扫描读文件、engine skip 判定、panel 请求层等），数据读路径失败改为计数/日志上报（如 ingest stats 增 `errors` 面、recall 失败计数），纯防御性兜底保留 | 公司机 A | **不改 RecallBackend 契约**（3a 约束继续有效）；只加可见性不加行为分支，禁止借机顺手重构；每处处置（收敛/保留）留销号说明 | 17 处逐条销号表入档；改动后 12 套测试全绿 + coverage 不降；无新增 ruff 告警 |
+
+### 8.2 G 项销号表（2026-09-17 实盘 36 处；立项"17 处"为质检报告低估值，以本表为准）
+
+| 文件 | 处数 | 处置 |
+|---|---|---|
+| recall.py | 3 | **:171 收敛**（MemoryRecall.read_errors 累计计数）、**:270 收敛**（TFIDFIndex.last_read_errors 每轮 build 重置）；:155 保留（索引异常回落全扫=设计降级路径，已有注释） |
+| semantic.py | 5 | **:163 收敛**（SemanticIndex.last_read_errors）；:73/:256/:291/:313 保留（recency 中性值/缓存写失败不阻断/语义失败回落 lexical/trust 回 unknown——均为降级语义非丢失） |
+| governance/_health.py | 1 | **:37 收敛**（健康报告 dict 增 `read_errors` key——报告面自身即可见性载体，新 key 向后兼容） |
+| governance/_scan.py | 2 | :22/:76 保留（扫描采样容错；问题清单本身即报告面，动返回结构违反 re-export 零变化约束） |
+| governance/_state.py | 3 | :128/:192/:217 保留（解析兜底/状态流转容错；异常即保守侧语义） |
+| panel.py | 7 | :51/:60/:403/:412/:439 保留（config 回落/语义层可选依赖/检索降级/sidecar 失败不阻断响应/trust 回落）；:448/:465 保留且本身即错误响应（HTTP 400 返回） |
+| panel_ops.py | 4 | :25/:75/:92 保留（展示兜底：FM 空/审计尾空/mtime 0）；:160 保留且本身即错误上报面（返回 error 字符串） |
+| crossref.py | 3 | :35/:59 保留（派生计算兜底：norm 空/title 回落 stem）；:153 保留（反链回写跳过——低频且结果人工可见度高） |
+| timegrap.py | 3 | :83/:252/:259 保留（展示层容错：title 回落文件名/mtime 回落 datetime.min/snippet 回空） |
+| trust_rank.py | 1 | :33 保留（读失败回 (None,None,None)，下游语义=unknown 档，安全侧） |
+| engine.py | 1 | :47 保留（skip 判定读失败=无法比对=重写，安全侧） |
+| audit.py | 1 | :84 保留且自带可见性动作（manifest 损坏即留 `.corrupt-<ts>` 快照文件留痕） |
+| access_log.py | 1 | :61 保留（曝光记录失败不阻断召回响应） |
+| bridge.py | 1 | :53 保留（桥导出读失败兜底） |
+
+合计 36 = 收敛 4 + 保留 32。

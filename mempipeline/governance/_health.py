@@ -19,8 +19,8 @@ def governance_health(mem_root: Path, tiers: Iterable[str] | None = None,
     汇总：各 status 分布、candidate 待审数、candidate 最长停留天数、各状态
     stale 天数分位。只计数不改状态，供周检报告渲染"治理活跃度"段。
 
-    返回：{"by_status": {...}, "candidate_pending": n, "candidate_oldest_days": int,
-          "non_active_ratio": float(0~1)}。
+    返回：{"by_status": {...}, "read_errors": n, "candidate_pending": n, "candidate_oldest_days": int,
+          "non_active_ratio": float(0~1)}。read_errors=读失败条目数（G 项可见性）。
     """
     from ..protocol import TIER_DIR
     from ..recall import scan_tier_dirs
@@ -29,12 +29,14 @@ def governance_health(mem_root: Path, tiers: Iterable[str] | None = None,
     by_status: dict[str, int] = {}
     cand_days: list[int] = []
     total = 0
+    read_err = 0  # G 项（2026-09-17）：读失败计数，随报告显形
     for tier in tiers:
         for d in scan_tier_dirs(mem_root, tier, projects):
             for md in d.glob("*.md"):
                 try:
                     txt = md.read_text(encoding="utf-8")
                 except Exception:
+                    read_err += 1  # G 项：计数不改变行为
                     continue
                 m = _FM_RE.match(txt)
                 if not m:
@@ -48,6 +50,7 @@ def governance_health(mem_root: Path, tiers: Iterable[str] | None = None,
     active = by_status.get("active", 0)
     return {
         "by_status": by_status,
+        "read_errors": read_err,
         "candidate_pending": by_status.get("candidate", 0),
         "candidate_oldest_days": max(cand_days) if cand_days else 0,
         "non_active_ratio": round((total - active) / total, 3) if total else 0.0,

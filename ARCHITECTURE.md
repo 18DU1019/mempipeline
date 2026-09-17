@@ -73,7 +73,7 @@
 | P2 | ~~三路召回并存~~ **重命名（2026-09-14）** | 原表述"收敛为单一读侧门面"经联网论证判定为**逆共识**：2026 生产级 RAG 共识是多路并行 + RRF 融合（InfoQ/Azure 等四源一致），砍单路还会拆掉 lexical 无 Ollama 降级护栏。债重命名为「**读侧门面（RecallService）缺失**」——三入口（MemoryRecall 全扫 / TFIDFIndex 倒排 / semantic hybrid）是**编排面分散**，非策略冗余。**触发线**：出现第 4 条读侧路径或 B 轨空间核接入时开工门面编排（一个入口、内部多路，对齐 Qdrant hybrid 形态）；当前无新增读侧需求，缓行非搁置。裁决留档：`_agent运行台\输出\mempipeline-三候选线论证与联网查漏补缺-2026-09-14.md` |
 | P2 | 上帝模块 **部分清偿（2026-09-14）** | ~~governance 混职责~~ → 已按职责拆包（`_state`/`_score`/`_scan`/`_health`，`__init__` re-export 外部 API 零变化，12 套测试全绿+覆盖率 85% 门禁兜底）。**拆分判据=职责耦合非行数**。timegrap(397) 键/图/信号共享数据结构、内聚度实测高于原评估，panel 已有 panel_ops 先例——剩余两模块不立项，功能扩张致耦合上升时按同款"零行为变化"口径再拆 |
 | P2 | 多键协调 | subject_key（文件名正则）/ project_id（权威）/ writer_id（溯源）三键，机器人稿件须带稳定 project_id 否则主题簇碎裂 |
-| P2 | TFIDFIndex 无 vacuum（2026-09-17 全链路质检登记） | `build()` 仅剔除 redacted 路径（recall.py 唯一 DELETE 分支），物理删除/外迁的镜像文件留幽灵索引路径，快路径召回会返回已不存在文件（一期笔记本读端正用索引快路径；MemoryRecall 全扫路径读盘自然不命中，无此问题）。**触发线**：D 项镜像同步或任何手工清理镜像后即暴露，二期 F 项清偿 |
+| P2 | ~~TFIDFIndex 无 vacuum~~ **已清偿（2026-09-17，二期 F 项）** | 质检发现：`build()` 仅剔除 redacted 路径，物理删除/外迁的镜像文件留幽灵索引路径，快路径召回返回已不存在文件。修复=build() 收集「父目录落在本轮扫描范围」的失存已知路径，与红act剔除同批 DELETE+一次 commit（原子），清单显式落 `self.last_vacuum` 供调用方打印（范围外路径保守不动防 mem_root 变更误清）；返回值仍为 int（新增索引数），6 处调用方零破坏。验收测试 test_mempipeline.test_tfidf_vacuum（删除场景 0 幽灵命中 + 清单正确 + 越界保守） |
 | P2 | 静默异常吞噬面（2026-09-17 全链路质检登记） | 包体 17 处 `except Exception: pass/continue`（ruff BLE001/S110/S112）：recall 读文件失败该条静默缺席候选、无计数无日志——数据管线的静默丢失风险，坏了不知道坏。二期 G 项收敛（只加可见性不改行为） |
 | P3 | ~~无覆盖率门禁~~ **已清偿（2026-09-14）** | 立 `coverage_gate.py`（逐自运行测试累积 coverage；pytest --cov 单独跑会低估至 40%，故不用之），TOTAL floor=80%、基线实测 85%，已接入 `.githooks/pre-commit` 替代原单文件冒烟。只准升不准降，改阈值须连带改 docstring 裁决日期 |
 

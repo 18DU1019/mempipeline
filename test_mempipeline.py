@@ -417,10 +417,69 @@ def test_tfidf_index() -> None:
         raise AssertionError("test_tfidf_index: 子断言失败")
 
 
+def test_tfidf_vacuum():
+    """二期 F 项（2026-09-17）验收：物理删除镜像文件后 build 清除幽灵路径。
+
+    验收口径（ARCHITECTURE.md §8.1 F 行）：索引后删文件再 build ->
+    快路径 0 幽灵命中 + 清除清单（last_vacuum）正确；范围外路径
+    （mem_root 变更场景）保守不动防误清。
+    """
+    ok = True
+
+    def check(cond: bool, msg: str):
+        nonlocal ok
+        tag = "PASS" if cond else "FAIL"
+        print(f"  [{tag}] {msg}")
+        if not cond:
+            ok = False
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem_root = tmp / "mem"
+        (mem_root / "02-中期记忆").mkdir(parents=True)
+        (mem_root / "02-中期记忆" / "会话-可保留-1111.md").write_text(
+            "---\ntype: note\ntitle: 可保留\nsummary: 保留稿\n"
+            "memory_tier: medium\n---\n\n可保留稿：再平衡纪律要点。\n",
+            encoding="utf-8")
+        ghost = mem_root / "02-中期记忆" / "会话-待删除-2222.md"
+        ghost.write_text(
+            "---\ntype: note\ntitle: 待删除\nsummary: 幽灵稿\n"
+            "memory_tier: medium\n---\n\n待删除稿：期权卖方风控要点。\n",
+            encoding="utf-8")
+        idx = TFIDFIndex(tmp / "vac.db")
+        built = idx.build(mem_root)
+        check(built == 2, f"首次 build 索引 2 篇 (实得 {built})")
+        check(idx.last_vacuum == [], "正常 build 无清除")
+
+        # 场景 1：物理删除一篇 -> 再 build -> 幽灵路径被清除且快路径不再命中
+        ghost.unlink()
+        added = idx.build(mem_root)
+        check(added == 0, f"删除后 build 无新增 (实得 {added})")
+        check(idx.count() == 1, f"幽灵路径已出倒排 (count={idx.count()})")
+        check(len(idx.last_vacuum) == 1 and Path(idx.last_vacuum[0]).name == ghost.name,
+              f"清除清单正确 (last_vacuum={idx.last_vacuum})")
+        hits = idx.recall("期权 风控", k=5)
+        check(hits == [], f"快路径 0 幽灵命中 (hits={hits})")
+        keep = idx.recall("再平衡", k=5)
+        check(len(keep) == 1, "幸存文档召回不受影响")
+
+        # 场景 2：mem_root 变更（known 全部越界）-> 保守不清，防整体误清
+        other = tmp / "other_root"
+        (other / "01-长期记忆").mkdir(parents=True)
+        n = idx.build(other)
+        check(idx.count() == 1, f"越界路径保守保留 (count={idx.count()})")
+        check(idx.last_vacuum == [], "越界场景清除清单为空")
+        check(n == 0, "越界场景无新增")
+        idx.close()
+    print("\nTFIDF VACUUM (F-2026-09-17):", "ALL PASS" if ok else "SOME FAILED")
+    if not ok:
+        raise AssertionError("test_tfidf_vacuum: 子断言失败")
+
+
 if __name__ == "__main__":
     _ok = main()
     for _fn in (test_crash_recover_sidecar, test_tfidf_recall, test_recall_golden,
-                test_project_isolation, test_tfidf_index):
+                test_project_isolation, test_tfidf_index, test_tfidf_vacuum):
         try:
             _fn()
         except AssertionError as _e:

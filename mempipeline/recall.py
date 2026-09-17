@@ -193,8 +193,12 @@ class TFIDFIndex:
     即可排序取 Top-K，不再每查询触碰全部笔记。
 
     - build()：扫描镜像，把 (path, norm_text, grams, doc_len) 与 gram→df 写入 SQLite。
-      同义归一复用 MemoryRecall._norm_doc，保证查询/文档两侧主词空间对等，与
-      MemoryRecall 打分结果一致（本方为快路径，非另一套语义策略）。
+      追加式：已 index 的跳过。同义归一复用 MemoryRecall._norm_doc，保证查询/
+      文档两侧主词空间对等，与 MemoryRecall 打分结果一致（本方为快路径，非另一
+      套语义策略）。F-vacuum（2026-09-17 二期 F 项）：父目录在本轮扫描
+      范围内的已知路径若已不存在于磁盘，随本轮一并从倒排清除，清单落
+      self.last_vacuum（调用方可打印/上报；范围外路径保守不动防 mem_root
+      变更误清）。返回本轮新增索引数。
     - recall()：查询同义归一后切 ngram，倒排查命中文档，按 TF-IDF 打分取 Top-K。
       返回值与 MemoryRecall.recall 同型（path, score），可用作同构替换。
 
@@ -204,6 +208,7 @@ class TFIDFIndex:
 
     def __init__(self, db_path: Path):
         self.db_path = db_path
+        self.last_vacuum: list[str] = []  # F-vacuum：最近一次 build() 清除的幽灵路径清单（供调用方打印）
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         # schema 演进迁移（A3 ASI06）：旧版 DB 的 doc 表可能缺 ckey 列，
         # CREATE TABLE IF NOT EXISTS 不会补列，导致 UNIQUE INDEX 建崩。
@@ -245,6 +250,16 @@ class TFIDFIndex:
         known = {r[0] for r in self._conn.execute("SELECT path FROM doc")}
         known_ckeys = {r[0] for r in self._conn.execute(
             "SELECT ckey FROM doc WHERE ckey IS NOT NULL")}
+        # F-vacuum（二期 F 项，2026-09-17）：known 中已不存在于磁盘的路径收集待清，
+        # 否则快路径召回返回幽灵文件（镜像物理删除/外迁后索引无感知）。
+        # 仅检查父目录落在本轮扫描范围内的已知路径：mem_root/tiers 变更场景
+        # （known 全部越界）保守不动，防整体误清。真删延后到本函数末尾与红act
+        # 剔除同批提交（原子）；清单显式落 self.last_vacuum 供调用方打印，索引层
+        # 自身不做输出。
+        scanned_dirs = {d for tier in tiers
+                        for d in scan_tier_dirs(mem_root, tier, projects)}
+        vacuum_paths = [p for p in sorted(known)
+                        if Path(p).parent in scanned_dirs and not Path(p).is_file()]
         docs: list[tuple[str, str, str, dict, int]] = []  # (path, ckey, norm, grams, len)
         drop_paths: set[str] = set()  # P3.12 红act：已索引的 redacted 文档须从倒排剔除
         for tier in tiers:
@@ -271,11 +286,17 @@ class TFIDFIndex:
                     docs.append((str(md), ckey, norms, grams, len(norms)))
         # P3.12 红act：从倒排剔除已 redacted 的旧索引条目（否则倒排仍残留该秘文）。
         # 必须在「新文档为空即早退」之前执行，保证重建索引仅剔除脱敏稿时也生效。
+        # F-vacuum：幽灵路径与红act剔除同批 DELETE + 一次 commit（原子）。
         if drop_paths:
             for p in drop_paths:
                 self._conn.execute("DELETE FROM doc WHERE path=?", (p,))
+        if vacuum_paths:
+            for p in vacuum_paths:
+                self._conn.execute("DELETE FROM doc WHERE path=?", (p,))
+        self.last_vacuum = vacuum_paths
+        if drop_paths or vacuum_paths:
             self._conn.commit()
-        if not docs and not drop_paths:
+        if not docs and not drop_paths and not vacuum_paths:
             return 0
         # 文档级写入
         for path, _ckey, norms, grams, ln in docs:

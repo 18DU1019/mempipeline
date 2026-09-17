@@ -36,6 +36,16 @@ sec = re.compile(r"""(?i)\b(token|api[_-]?key|secret|password|passwd|auth)\b\s*[
 tok = re.compile(r"sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|gho_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16}|xox[bp]-[A-Za-z0-9-]{10,}")
 key = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
 private_mail = re.compile(r"(?i)@qq\.com")
+# 个人标识扫描（2026-09-17 补盲区：主机名/内网段/个人路径）。
+# 模式文本用 [x] 单字符类断开触发串（Us[e]rs/[t]ao），防本文件入库时被自身拦截。
+pio = [
+    ("主机名A", re.compile(r"BF-\d{12}")),
+    ("主机名B", re.compile(r"(?i)\b[t]ao\b")),
+    ("Tailscale网段", re.compile(r"100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.\d+\.\d+")),
+    ("个人路径Win", re.compile(r"(?i)\b[CDH]:\\+(?:Us[e]rs|On[e]Quant|[A]I)")),
+    ("个人路径MSYS", re.compile(r"(?i)/(?:c|d|h)/(?:Us[e]rs|On[e]Quant|[A]I)")),
+    ("个人路径Mix", re.compile(r"(?i)\b[CDH]:/(?:Us[e]rs|On[e]Quant|[A]I)")),
+]
 
 hits = 0
 for sha in shas:
@@ -53,6 +63,10 @@ for sha in shas:
         if ln.startswith("Author:") or ln.startswith("Commit:"):
             if private_mail.search(ln):
                 print(f"[pre-push] 身份门禁 {sha[:8]}: {ln.strip()}（个人邮箱禁止推送，须用 GitHub noreply）")
+                hits += 1
+        for label, pat in pio:
+            if pat.search(ln):
+                print(f"[pre-push] 个人标识命中({label}) {sha[:8]}: {ln.strip()[:120]}")
                 hits += 1
 
 if hits:

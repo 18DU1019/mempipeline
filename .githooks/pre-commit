@@ -2,7 +2,7 @@
 # pre-commit 轻量门禁：Python 语法 + 隐私驻点（硬编码路径/密钥） + 冒烟测试
 # 隐私扫描复用开源 SOP 阶段1第5类规则：拦截硬编码绝对磁盘路径与内联密钥，
 # 占位符（your-xxx / example / placeholder / <> 等）视为合法配置样例白名单放行。
-PY="${PYTHON:-<venv-python>}"  # 默认真实解释器；可用环境变量 PYTHON 覆盖
+PY="${PYTHON:-$(git config --get mempipeline.python 2>/dev/null || echo python3)}"  # 解释器解析序：环境变量 PYTHON > 仓库本地配置 mempipeline.python（不入库）> PATH 中的 python3
 echo "=== [pre-commit] Python 语法检查 ==="
 fail=0
 for f in $(git diff --cached --name-only --diff-filter=ACM | grep '\.py$'); do

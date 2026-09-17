@@ -3,8 +3,7 @@
 # 范围：远端已有提交用 remote_sha..local_sha；新分支用 rev-list --not --remotes 取未推送提交集合
 # 身份门禁：作者/提交者邮箱不得为个人邮箱（须用 GitHub noreply），防个人身份外泄到公开仓库
 # 显式逃生口：ALLOW_INSECURE_PUSH=1 git push ...（显式放行，不静默；对齐 KB_ALLOW_MIXED 惯例）
-PY="${PYTHON:-}"
-[ -z "$PY" ] && PY='/opt/venv/Scripts/python.exe"  # 默认真实解释器；路径断写（同 [x] 惯例）防 pio 自拦；可用环境变量 PYTHON 覆盖
+PY="${PYTHON:-$(git config --get mempipeline.python 2>/dev/null || echo python3)}"  # 解释器解析序：环境变量 PYTHON > 仓库本地配置 mempipeline.python（不入库）> PATH 中的 python3
 if [ "${ALLOW_INSECURE_PUSH:-0}" = "1" ]; then
   echo "=== [pre-push] ALLOW_INSECURE_PUSH=1 显式放行，跳过扫描 ==="
   exit 0

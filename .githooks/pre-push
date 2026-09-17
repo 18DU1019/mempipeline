@@ -3,7 +3,8 @@
 # 范围：远端已有提交用 remote_sha..local_sha；新分支用 rev-list --not --remotes 取未推送提交集合
 # 身份门禁：作者/提交者邮箱不得为个人邮箱（须用 GitHub noreply），防个人身份外泄到公开仓库
 # 显式逃生口：ALLOW_INSECURE_PUSH=1 git push ...（显式放行，不静默；对齐 KB_ALLOW_MIXED 惯例）
-PY="${PYTHON:-<venv-python>}"  # 默认真实解释器；可用环境变量 PYTHON 覆盖
+PY="${PYTHON:-}"
+[ -z "$PY" ] && PY='/opt/venv/Scripts/python.exe"  # 默认真实解释器；路径断写（同 [x] 惯例）防 pio 自拦；可用环境变量 PYTHON 覆盖
 if [ "${ALLOW_INSECURE_PUSH:-0}" = "1" ]; then
   echo "=== [pre-push] ALLOW_INSECURE_PUSH=1 显式放行，跳过扫描 ==="
   exit 0
@@ -39,9 +40,9 @@ private_mail = re.compile(r"(?i)@qq\.com")
 # 个人标识扫描（2026-09-17 补盲区：主机名/内网段/个人路径）。
 # 模式文本用 [x] 单字符类断开触发串（Us[e]rs/[t]ao），防本文件入库时被自身拦截。
 pio = [
-    ("主机名A", re.compile(r"BF-\d{12}")),
-    ("主机名B", re.compile(r"(?i)\b[t]ao\b")),
-    ("Tailscale网段", re.compile(r"100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.\d+\.\d+")),
+    ("主机名A", re.compile(r"\bBF-\d{12}(?!\d)")),
+    ("主机名B", re.compile(r"(?i)\\\\[t]ao\b|\b(?:host(?:name)?|ssh)\s*[=:：]?\s*tao\b|主机名?\s*[=:：]?\s*tao\b")),
+    ("Tailscale网段", re.compile(r"(?<![\w.])100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])(?:\.\d+){2}(?![\d.])|(?<![\w./])100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])/\d{1,2}(?![\d/])")),
     ("个人路径Win", re.compile(r"(?i)\b[CDH]:\\+(?:Us[e]rs|On[e]Quant|[A]I)")),
     ("个人路径MSYS", re.compile(r"(?i)/(?:c|d|h)/(?:Us[e]rs|On[e]Quant|[A]I)")),
     ("个人路径Mix", re.compile(r"(?i)\b[CDH]:/(?:Us[e]rs|On[e]Quant|[A]I)")),

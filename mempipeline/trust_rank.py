@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from .protocol import (TRUST_KNOWN, TRUST_UNKNOWN, TRUST_UNTRUSTED,
-                       normalize_trust)
+                       cap_trust, normalize_trust)
 from .writer_contracts import baseline_trust_of
 
 # 档位→排序权重：越小越优先。untrusted 权重最大（排最后）。
@@ -51,24 +51,29 @@ def _scan_fm(path: Path) -> tuple[str | None, str | None, str | None]:
 
 
 def trust_of_path(md_path: str | Path, trusted: frozenset[str]) -> str:
-    """解析单条笔记的信任档：显式 trust > writer_id 登记基线 > source_agent 名单。
+    """解析单条笔记的信任档：显式 trust 归一后**封顶**于写者基线（P1 修订）。
 
-    规则（与方案 B/P0 一致）：
-    - frontmatter 含 trust 字段 → 直接归一（显式覆盖一切来源判定）；
-    - 无 trust → 读 writer_id，按登记表 baseline_trust_of 取静态基线
-      （登记表是信任唯一权威源，source_agent 名单法无法区分 distill/staging 同源冲突）；
-    - 无 writer_id（存量/未登记）→ 回退 source_agent 名单映射，保持向后兼容；
-    - 都无 → unknown（无标记存量保守回落）。
+    规则（与方案 B/P0 + P1 封顶一致）：
+    - 基线解析：writer_id 登记表 baseline_trust_of 优先（登记表是信任唯一
+      权威源，source_agent 名单法无法区分 distill/staging 同源冲突）；
+      无 writer_id → 回退 source_agent 名单映射，保持向后兼容；两者皆无 →
+      unknown（零身份背书保守上限）。
+    - frontmatter 含 trust 字段 → 归一后按基线封顶（cap_trust/min）：自声明
+      是又一种自报证据，不得越过基线——存量由旧版写入的越权 trust 值在读取
+      侧同样被压回，无需重灌。
+    - 无 trust → 直接取基线。
     """
     path = Path(md_path)
     trust, source, writer = _scan_fm(path)
-    if trust is not None:
-        return normalize_trust(trust, trusted)
     if writer:
-        return normalize_trust(baseline_trust_of(writer), trusted)
-    if source is not None:
-        return normalize_trust(source, trusted)
-    return TRUST_UNKNOWN
+        baseline = normalize_trust(baseline_trust_of(writer), trusted)
+    elif source is not None:
+        baseline = normalize_trust(source, trusted)
+    else:
+        baseline = TRUST_UNKNOWN
+    if trust is not None:
+        return cap_trust(normalize_trust(trust, trusted), baseline)
+    return baseline
 
 
 def rank_with_trust(hits: Iterable[tuple[str, float]],

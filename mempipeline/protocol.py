@@ -44,6 +44,22 @@ def normalize_trust(raw: str | None, trusted: frozenset[str]) -> str:
     return TRUST_KNOWN if v in {str(t).strip().lower() for t in trusted} else TRUST_UNTRUSTED
 
 
+# P1-封顶（2026-09-17）：三档有序化，供 min 语义封顶。trusted > unknown > untrusted。
+TRUST_ORDER = {TRUST_KNOWN: 2, TRUST_UNKNOWN: 1, TRUST_UNTRUSTED: 0}
+
+
+def cap_trust(declared: str, baseline: str) -> str:
+    """信任封顶：取两档中较低者（min 语义），显式声明不得越过登记基线。
+
+    P1 修复：投稿自带的 trust 字段视为又一种自声明证据，与 writer_contracts
+    「信任 = min(基线, 观测置信)」对齐——静态基线是上限，写读两侧共用本原语。
+    两入参须已是 normalize_trust 归一后的三档值；未知档位按 unknown 保守处理。
+    """
+    da = TRUST_ORDER.get(declared, TRUST_ORDER[TRUST_UNKNOWN])
+    ba = TRUST_ORDER.get(baseline, TRUST_ORDER[TRUST_UNKNOWN])
+    return declared if da <= ba else baseline
+
+
 def now_iso() -> str:
     return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
 

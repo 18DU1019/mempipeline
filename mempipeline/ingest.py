@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Callable
 
 from .protocol import (DEFAULT_TIER, DEFAULT_TRUSTED_AGENTS, TIER_DIR,
-                       TRUST_UNKNOWN, Note, content_key, normalize_trust,
+                       Note, cap_trust, content_key, normalize_trust,
                        safe_project_id, strip_frontmatter, title_token, unquote)
 from .engine import write_atomic
 from .audit import AuditBackend
@@ -58,8 +58,9 @@ def ingest(staging_dir: Path, mem_root: Path, tier_dirs: dict[str, str] | None,
     ...（tier_dirs 等说明同上）
 
     trusted_agents（P0）：写侧信任分层。投稿落盘时把信任档写入 frontmatter：
-    - 投稿显式声明 trust 字段 → 直接采用归一结果；
-    - 否则按 source_agent 是否在 trusted_agents 名单映射；
+    - 投稿显式声明 trust 字段 → 归一后按写者基线**封顶**（P1 修复：min 语义，
+      自声明不得越过登记基线，杜绝 trust:"trusted" 自我升档直通）；
+    - 否则取写者基线（writer_id 登记表优先，无 writer_id 回落 source_agent 名单）；
     - trusted_agents 缺省 None ⇒ 仅信任 "workbuddy"（单写者蒸馏主链高信任）。
     trust 写入 note.extra（经 to_frontmatter 透传），不参与桥导出白名单。
     """
@@ -82,16 +83,20 @@ def ingest(staging_dir: Path, mem_root: Path, tier_dirs: dict[str, str] | None,
             tier = DEFAULT_TIER
         source_agent = fm.get("source_agent") or "workbuddy"
         writer_id = fm.get("writer_id")
-        # P0 写侧信任分层：显式 trust > writer_id 登记基线 > source_agent 名单兜底。
+        # P0 写侧信任分层（P1 封顶修订）：基线 = writer_id 登记表 > source_agent 名单。
         # source_agent 名单法无法区分 distill/staging 同源(workbuddy)的信任冲突，
         # 故带 writer_id 的登记投稿一律以登记表 baseline_trust 为准。
+        # 显式 trust 声明归一后按基线封顶（cap_trust/min）：自声明是又一种自报
+        # 证据，不得越过登记基线——堵住投稿写 trust:"trusted" 自我升档的直通道。
         trusted = trusted_agents if trusted_agents is not None else DEFAULT_TRUSTED_AGENTS
-        if fm.get("trust") is not None:
-            trust = normalize_trust(fm["trust"], trusted)
-        elif writer_id:
-            trust = normalize_trust(baseline_trust_of(writer_id), trusted)
+        if writer_id:
+            baseline = normalize_trust(baseline_trust_of(writer_id), trusted)
         else:
-            trust = normalize_trust(source_agent, trusted)
+            baseline = normalize_trust(source_agent, trusted)
+        if fm.get("trust") is not None:
+            trust = cap_trust(normalize_trust(fm["trust"], trusted), baseline)
+        else:
+            trust = baseline
         note = Note(
             title=fm.get("title") or "untitled",
             summary=fm.get("summary") or "（无摘要）",

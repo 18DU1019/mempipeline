@@ -68,6 +68,7 @@
 
 | 级 | 债 | 说明 |
 |---|---|---|
+| P1 | ~~信任自声明越权~~ **已清偿（2026-09-17）** | 全链路质检发现：投稿自带 `trust:"trusted"` 经 normalize_trust 三档字面量直通，绕过 WRITER_CONTRACTS 登记表，与 trust_rank「登记表唯一权威源」口径矛盾。修复=`cap_trust`（min 语义）原语入 protocol，ingest 写侧 + trust_of_path 读侧双端封顶（自声明归一后 min 于写者基线；存量越权 frontmatter 读取侧即压回，无需重灌）；对齐 writer_contracts「信任 = min(基线, 观测置信)」既有模型，test_trust.py §6 六断言覆盖 |
 | P1 | ~~无系统架构正本~~ | 本文件已立，历史缺口关闭 |
 | P2 | ~~三路召回并存~~ **重命名（2026-09-14）** | 原表述"收敛为单一读侧门面"经联网论证判定为**逆共识**：2026 生产级 RAG 共识是多路并行 + RRF 融合（InfoQ/Azure 等四源一致），砍单路还会拆掉 lexical 无 Ollama 降级护栏。债重命名为「**读侧门面（RecallService）缺失**」——三入口（MemoryRecall 全扫 / TFIDFIndex 倒排 / semantic hybrid）是**编排面分散**，非策略冗余。**触发线**：出现第 4 条读侧路径或 B 轨空间核接入时开工门面编排（一个入口、内部多路，对齐 Qdrant hybrid 形态）；当前无新增读侧需求，缓行非搁置。裁决留档：`_agent运行台\输出\mempipeline-三候选线论证与联网查漏补缺-2026-09-14.md` |
 | P2 | 上帝模块 **部分清偿（2026-09-14）** | ~~governance 混职责~~ → 已按职责拆包（`_state`/`_score`/`_scan`/`_health`，`__init__` re-export 外部 API 零变化，12 套测试全绿+覆盖率 85% 门禁兜底）。**拆分判据=职责耦合非行数**。timegrap(397) 键/图/信号共享数据结构、内聚度实测高于原评估，panel 已有 panel_ops 先例——剩余两模块不立项，功能扩张致耦合上升时按同款"零行为变化"口径再拆 |

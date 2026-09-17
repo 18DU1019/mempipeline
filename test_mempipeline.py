@@ -523,11 +523,127 @@ def test_g_error_visibility():
         raise AssertionError("test_g_error_visibility: 子断言失败")
 
 
+def test_inject_rules():
+    """二期 A 项（2026-09-17）验收：读端规则层 + 注入等价物（正本常数忠实性）。
+
+    评分正本 = 公司机脚本版字面常数（W_R/LAMBDA/W_I/W_S=0.4/0.05/0.4/0.2、
+    LAYER_IMP、RULE_REL_BOOST=2.5、ABSTAIN=W_S*0.5、recency 封顶 0.2、
+    activity_date 链 last_active>created>updated）。本测试按正本公式手工
+    复算期望值逐条断言；真·跨机一致性（top3 对齐公司机脚本）在笔记本部署
+    实测时以判别力查询集校准（§8 A 行验收口径）。
+    """
+    ok = True
+
+    def check(cond: bool, msg: str):
+        nonlocal ok
+        tag = "PASS" if cond else "FAIL"
+        print(f"  [{tag}] {msg}")
+        if not cond:
+            ok = False
+
+    import math as _math
+    from datetime import datetime as _dt, timedelta as _td
+
+    from mempipeline.inject import (ABSTAIN_REL, LAYER_IMP, RECENCY_CAP,
+                                    RULE_LAYER, RULE_REL_BOOST, RULE_REL_GATE,
+                                    W_I, W_R, W_S, _build_idf_mix,
+                                    _days_since, _layer_of, activity_date,
+                                    collect_rules, inject, score_mixed)
+
+    # 正本常数字面复核（防手滑改参）
+    check((W_R, W_S, W_I) == (0.4, 0.2, 0.4) and RULE_REL_BOOST == 2.5,
+          "正本字面常数 W_R/W_S/W_I/RULE_REL_BOOST")
+    check(ABSTAIN_REL == W_S * 0.5 and RULE_REL_GATE == W_S * 0.5
+          and RECENCY_CAP == 0.2, "弃权线/闸门/封顶与正本同源")
+    check(LAYER_IMP == {"01-长期记忆": 0.9, "02-中期记忆": 0.6, "01-规则": 0.9},
+          "LAYER_IMP 三层表")
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem_root = tmp / "mem"
+        rule_root = tmp / "rules"
+        (mem_root / "01-长期记忆").mkdir(parents=True)
+        (mem_root / "02-中期记忆").mkdir(parents=True)
+        rule_root.mkdir(parents=True)
+
+        today = _dt.now().strftime("%Y-%m-%d")
+        yest = (_dt.now() - _td(days=1)).strftime("%Y-%m-%d")
+        # 规则条目：与 query "仓位 管理" 高重叠（ngram 命中充足）触发 boost
+        (rule_root / "规则-仓位纪律.md").write_text(
+            "---\ntype: rule\ntitle: 仓位纪律\nsummary: 仓位管理纪律\n"
+            "importance: 0.9\n---\n\n仓位管理：加仓纪律与减仓纪律。\n", encoding="utf-8")
+        # 中期条目：last_active=今天 → recency 满 0.4 但须封顶 0.2
+        (mem_root / "02-中期记忆" / "会话-定投-1111.md").write_text(
+            f"---\ntype: note\ntitle: 定投纪律\nsummary: 定投与再平衡\n"
+            f"memory_tier: medium\nlast_active: {today}\n---\n\n定投纪律：再平衡频率。\n",
+            encoding="utf-8")
+        # 长期锚点：无 last_active，created=昨天（activity_date 链取 created）
+        (mem_root / "01-长期记忆" / "锚-资产配置-2222.md").write_text(
+            f"---\ntype: note\ntitle: 资产配置锚\nsummary: 资产配置与仓位\n"
+            f"memory_tier: long\ncreated: {yest}\n---\n\n资产配置锚：仓位上限。\n",
+            encoding="utf-8")
+        # 坏编码文件（读失败计数联动）
+        (mem_root / "01-长期记忆" / "会话-坏编码-3333.md").write_bytes(
+            b"---\ntitle: bad\n---\n\n\xff\xfe\xff invalid\n")
+
+        rules = collect_rules(rule_root)
+        check(len(rules) == 1 and "仓位管理" in rules[0][2], "collect_rules 平铺收集+文本拼接")
+        check(rules[0][1].get("title") == "仓位纪律", "规则 frontmatter 解析")
+
+        # 规则条目打分：rec 恒 0、imp=0.4*0.9、boost 闸门生效
+        # （layer 显式传：rule_root 目录名数据无关化，inject 主流程对规则集同样显式传）
+        fm_r = rules[0][1]
+        entries_texts = [t for _p, _fm, t in rules]
+        idf1 = _build_idf_mix(entries_texts)
+        s_rule = score_mixed(rules[0][0], fm_r, rules[0][2], "仓位 管理", idf1,
+                             layer=RULE_LAYER)
+        check(s_rule["rec"] == 0.0, f"规则层 Recency 恒 0 (实得 {s_rule['rec']})")
+        check(abs(s_rule["imp"] - W_I * 0.9) < 1e-9, f"imp=W_I*0.9 (实得 {s_rule['imp']})")
+        check(s_rule["lex"] >= 0.5 and abs(s_rule["rel"] - W_S * s_rule["lex"] * RULE_REL_BOOST) < 1e-9,
+              f"boost 生效 rel=W_S*lex*2.5 (lex={s_rule['lex']:.3f} rel={s_rule['rel']:.3f})")
+
+        # 无关规则：rel=0 不 boost（闸门语义）
+        (rule_root / "规则-无关主题.md").write_text(
+            "---\ntitle: 无关主题\nsummary: 烹饪火候\n---\n\n烹饪火候与食材。\n", encoding="utf-8")
+        rules2 = collect_rules(rule_root)
+        idf2 = _build_idf_mix([t for _p, _fm, t in rules2])
+        s_off = score_mixed(rules2[1][0], rules2[1][1], rules2[1][2], "仓位 管理", idf2,
+                            layer=RULE_LAYER)
+        check(s_off["lex"] == 0.0 and s_off["rel"] == 0.0, "无关规则零重叠不 boost")
+
+        # recency 封顶：中期 last_active=今天，raw=0.4 但 cap=0.2
+        r = inject("定投 纪律", mem_root, rule_root)
+        mid = next((s for s in r["top"] if s["layer"] == "02-中期记忆"), None)
+        check(mid is not None and mid["rec"] == RECENCY_CAP,
+              f"中期 recency 封顶 0.2 (实得 {mid['rec'] if mid else None})")
+        check(mid is not None and abs(mid["total"] - (RECENCY_CAP + W_I * 0.6 + mid["rel"])) < 1e-9,
+              "total=rec+imp+rel 正本公式")
+
+        # 锚点归类 + activity_date 链（created 优先于 updated/缺失）
+        check(any(s["layer"] == "01-长期记忆" for s in r["anchor"]), "长期锚点归类")
+        anchor_fm = {"created": yest, "updated": today}
+        check(activity_date(anchor_fm) == yest and _days_since(yest) == 1,
+              "activity_date 链 last_active>created>updated + days 计算")
+        check(_layer_of(Path(r"x/02-中期记忆/a.md")) == "02-中期记忆"
+              and _layer_of(Path(r"x/other/a.md")) == "01-长期记忆", "_layer_of 判层")
+
+        # warmup 升序 + abstain + 读失败计数
+        check(len(r["warmup"]) >= 2 and r["warmup"][0]["days"] <= r["warmup"][-1]["days"],
+              "warmup 按天数升序")
+        check(r["read_errors"] == 1, f"读失败计数联动 (实得 {r['read_errors']})")
+        r_abstain = inject("量子力学 测不准", mem_root, rule_root)
+        check(r_abstain["abstain"] is True, "无关 query 触发弃权线")
+        check(r["abstain"] is False, "相关 query 不弃权")
+    print("\nA INJECT RULES (2026-09-17):", "ALL PASS" if ok else "SOME FAILED")
+    if not ok:
+        raise AssertionError("test_inject_rules: 子断言失败")
+
+
 if __name__ == "__main__":
     _ok = main()
     for _fn in (test_crash_recover_sidecar, test_tfidf_recall, test_recall_golden,
                 test_project_isolation, test_tfidf_index, test_tfidf_vacuum,
-                test_g_error_visibility):
+                test_g_error_visibility, test_inject_rules):
         try:
             _fn()
         except AssertionError as _e:

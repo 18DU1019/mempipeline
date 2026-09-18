@@ -10,16 +10,30 @@ if [ "${ALLOW_INSECURE_PUSH:-0}" = "1" ]; then
 fi
 
 all_commits=""
+rl_fail=0
 while read -r local_ref local_sha remote_ref remote_sha; do
   # 删除远端分支：无内容推送，跳过
   [ "$local_sha" = "0000000000000000000000000000000000000000" ] && continue
   if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
     # 新分支：只取不在任何远端上的提交
-    all_commits="$all_commits $(git rev-list "$local_sha" --not --remotes 2>/dev/null)"
+    out=$(git rev-list "$local_sha" --not --remotes 2>/dev/null)
   else
-    all_commits="$all_commits $(git rev-list "$remote_sha..$local_sha" 2>/dev/null)"
+    # 重写历史后 force push 场景：remote_sha（旧 hash）可能已不在本地对象库，
+    # rev-list 会失败——fail-closed，绝不静默放行（2026-09-18 盲区修复）
+    out=$(git rev-list "$remote_sha..$local_sha" 2>/dev/null)
   fi
+  if [ $? -ne 0 ]; then
+    echo "❌ [pre-push] rev-list 失败（远端引用 $remote_sha 不在本地库？历史重写后 force push 场景）。"
+    echo "    拒绝静默放行。处置：人工全历史自扫（密钥/邮箱/个人路径）确认干净后，"
+    echo "    用 ALLOW_INSECURE_PUSH=1 git push ... 显式放行。"
+    rl_fail=1
+    break
+  fi
+  all_commits="$all_commits $out"
 done
+if [ "$rl_fail" = "1" ]; then
+  exit 1
+fi
 # 去重；全空则无事可扫
 all_commits=$(echo $all_commits | tr ' ' '\n' | sort -u | tr '\n' ' ')
 if [ -z "$(echo $all_commits | tr -d ' ')" ]; then

@@ -98,14 +98,18 @@ from mempipeline.recall import MemoryRecall, TFIDFIndex
 
 idx = TFIDFIndex(Path("./recall.db"))
 idx.build(mem_root)                 # one-time scan; idempotent (skips indexed docs)
-m = MemoryRecall(mem_root, index=idx)   # fast path used when no synonyms normalization
+m = MemoryRecall(mem_root, index=idx)   # fast path: no normalization, or index normalized with the same synonym table
 ```
 
 - `recall()` returns the same `(path, score)` shape as `MemoryRecall`, so the
   index is a drop-in fast path, not a second retrieval strategy. On any query
   error it falls back to the full scan.
-- When `synonyms` normalization is active, the query/scan path is used so the
-  normalized space stays consistent with `MemoryRecall`.
+- When `synonyms` normalization is active on `MemoryRecall`, the fast path
+  survives only if the index was built with the same synonym table
+  (`TFIDFIndex` normalizes documents at `build()` time and queries at recall
+  time, so a same-table injection stays isomorphic to the full scan);
+  a foreign-table index falls back to the full scan. The built-in
+  `recall.DEFAULT_SYNONYMS` table is what the panel/semantic gates use.
 - `governance.governance_health()` is a separate read-only snapshot (status
   distribution, candidate backlog & oldest-stale age) for rendering the
   governance-review pane.
@@ -205,7 +209,7 @@ introduced - only the time-dimension signals already validated in P2.
    ingest(staging, mem, {"long": "01-长期记忆", "medium": "02-中期记忆"},
           audit, on_ingest=lambda o: print("git add --", o))
    ```
-4. **读者**：用本仓库 `recall.MemoryRecall`（ngram TF-IDF + 同义归一）或 `semantic.hybrid_recall`（bge-m3 + RRF 融合）做召回；时间演化用 `timegrap.build_timeline`（P2）；交叉引用用 `crossref.find_related`。大镜像可先用 `recall.TFIDFIndex.build()` 建 SQLite 倒排，再注入 `MemoryRecall(index=...)` 走快路径（同义词归一时直线回落全扫，口径一致）。
+4. **读者**：用本仓库 `recall.MemoryRecall`（ngram TF-IDF + 同义归一）或 `semantic.hybrid_recall`（bge-m3 + RRF 融合）做召回；时间演化用 `timegrap.build_timeline`（P2）；交叉引用用 `crossref.find_related`。大镜像可先用 `recall.TFIDFIndex.build()` 建 SQLite 倒排，再注入 `MemoryRecall(index=...)` 走快路径（无归一、或索引与实例用同一张同义表双侧归一时保持快路径；异表索引回落全扫，口径一致）。
 
 ### DQ 转义契约（2026-08-27 起生效）
 

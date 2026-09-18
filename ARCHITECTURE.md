@@ -147,3 +147,17 @@
 | 项 | 内容 | 执行侧 | 口径 / 红线 | 验收 |
 |---|---|---|---|---|
 | H 面板监控三块（召回质量/索引新鲜度/活跃度） | panel 新增只读端点：`/api/activity`（updated 月度分桶近 12 月 + 窗口外数 + latest，mtime 兜底）、`/api/exposure?days=`（AccessLog.distribution + 未曝光面对账）；索引新鲜度复用既有 `/api/index_status`（indexed vs mirror gap），不重复造。纯逻辑落 panel_ops（B5 分层），panel.py 只接线；hub :8791 加「记忆监控」展示卡消费三端点（展示层归 hub，对齐「运维监控已迁 :8791」既有决策） | 公司机 A | 只读观测，不写任何文件、不进评分链路（AMV-P1 口径延续：sidecar 先记录不消费）；exposure 未配置 sidecar 时降级 `enabled=false` 不报错；时间基准 naive 本地（与 access_log.record/now_iso 同口径，不引入 tz 分叉） | test_panel.test_activity_exposure（分桶窗口/latest 提取/未曝光对账/降级 8 断言）；test_panel 套全绿 |
+
+### 8.4 AGI-② 同义词表落地（2026-09-18，AGI 记忆借鉴三候选之②销号）
+
+> 词表内容经用户"八组照单全收"拍板，接线范围经用户"全部接线+门复跑"拍板。落地中发现并发会话正在同仓 rebase（600b232 已先行提交词表进包 + TFIDFIndex 双侧归一），本会话接线由 stash 恢复后完成。
+
+| 维度 | 定案 |
+|---|---|
+| 词表 | `recall.py :: DEFAULT_SYNONYMS` 8 组：commit→提交、frontmatter→metadata、audit→审计、sandbox→沙箱、闭环→收尾/收口、记忆入库→沉淀、回撤→回吐、估值→低估值/低估。head=语料高频形式（df 实测），alts=纯查询词（df≈0） |
+| 接线点 | panel.py hybrid 搜索 + `_tfidf()`；semantic.py `hybrid_recall` lexical 腿（调用方注入实例时以注入方配置为准）；weekly_health.py `golden_regress` 门禁与生产同表（防"生产归一、门禁不归一"口径漂移）；运行台 `脚本/recall.py` 查询侧接线为前置已入库 |
+| 词表修正 | 删「元数据」alt（frontmatter 组）：GOLDEN 回归实证中文通用词强映射到特指 YAML 头引发词法漂移——"9月5日 知识库 大扫除 元数据 治理"锚点被 frontmatter 主题笔记挤出 Top-5（hit_rate 1.0→0.9167），用户拍板删 alt，门禁复跑回 1.0 |
+| 延迟实测 | 294 篇真实镜像：同义归一开销≈0（794→799ms/查询）；真实代价=MemoryRecall 携归一配置时索引快路径关闭（回落全扫 ~800ms/查询）。TFIDFIndex 双侧归一（600b232，build 侧落盘+查询侧归一）已为"快路径与归一并存"铺路：生产 tfidf.db 以 synonyms 重建（周检 rebuild_tfidf 传表即可）后可恢复快路径，属后续可选项未做 |
+| 语义边界 | 整词归一：中文连写（如"提交的精确判据"）不触发；空表时行为与旧版完全一致（可逆）。排除组（语义冲突不合并）：快照↔备份 / IRR↔年化 / ETF↔指数基金 |
+| 验收 | test_mempipeline/test_semantic/test_panel 三套件全绿；GOLDEN 门禁两口径（无同义/默认表）hit_rate 与 freshness 均 1.0、passed=true |
+| ③ JUDGE | 状态不变：权重搜索缓挂（观察期内判定数据未满 3 次阈值，不动权重） |

@@ -41,7 +41,7 @@ from .panel_ops import (
     _submit_note,
     collect_stats,
 )
-from .recall import MemoryRecall
+from .recall import DEFAULT_SYNONYMS, MemoryRecall
 
 # 面板投稿位（与 WorkBuddy 投稿契约一致，TRAE 端 staging_ingest.py 熔合）
 def _resolve_staging_root() -> Path:
@@ -400,7 +400,8 @@ class _Handler(BaseHTTPRequestHandler):
                                         memory=MemoryRecall(
                                             self.mem_root,
                                             projects=[proj] if proj else None,
-                                            index=self.tfidf_index),
+                                            index=self.tfidf_index,
+                                            synonyms=DEFAULT_SYNONYMS),
                                         projects=[proj] if proj else None,
                                         trust_rank=self.trust_rank,
                                         trusted_agents=self._trusted)
@@ -431,8 +432,10 @@ class _Handler(BaseHTTPRequestHandler):
             _json(self, {"error": "not found"}, 404)
 
     def _tfidf(self, q: str, k: int, proj: str | None) -> list:
+        # AGI-②（2026-09-18）：搜索查询走默认同义归一。代价=索引快路径关闭
+        # （recall() 遇归一配置回落全扫），294 篇实测 ~800ms/查询，可接受。
         m = MemoryRecall(self.mem_root, projects=[proj] if proj else None,
-                         index=self.tfidf_index)
+                         index=self.tfidf_index, synonyms=DEFAULT_SYNONYMS)
         hits = m.recall(q, k)
         if self.trust_rank:
             from .trust_rank import rank_with_trust

@@ -645,6 +645,9 @@ def test_default_synonyms():
     收录依据：317 篇定向 df（head=语料高频形式：commit 73/frontmatter 36/audit 35/
     闭环 36/记忆入库 30…；alts 多为 df=0 纯查询词）+ 30 条真实查询日志。
     排除组（不合并）：快照↔备份 / IRR↔年化 / ETF↔指数基金（语义冲突）。
+    「元数据」alt 已删（2026-09-18 GOLDEN 回归实证）：中文通用词强映射到特指 YAML
+    头引发词法漂移（"9月5日…元数据 治理" 锚点被 frontmatter 主题笔记挤出 Top-5，
+    hit_rate 1.0→0.9167），用户拍板删 alt 保门禁 1.0。
     已知边界：整词语义，中文连写（如「提交的精确判据」）不触发归一。
     """
     import tempfile
@@ -655,9 +658,10 @@ def test_default_synonyms():
     norm = syn_norm_map(DEFAULT_SYNONYMS)
     assert len(DEFAULT_SYNONYMS) == 8, f"默认表应为 8 组 {sorted(DEFAULT_SYNONYMS)}"
     assert norm["commit"] == "commit" and norm["提交"] == "commit", "head 自映射+alts 归一"
-    # 查询侧整词归一：空格分词的查询触发（真实日志习惯："沙箱 拦截"/"元数据 治理"）
+    # 查询侧整词归一：空格分词的查询触发（真实日志习惯："沙箱 拦截"）
     assert map_terms("知识库 git 提交 判据", norm) == "知识库 git commit 判据"
-    assert map_terms("元数据 治理", norm) == "frontmatter 治理"
+    # 「元数据」不归一（alt 已删，见 docstring）：中文通用词保留原词形
+    assert map_terms("元数据 治理", norm) == "元数据 治理"
     # 已知边界：中文连写不触发（整词语义，与 _norm_doc 口径一致）
     assert map_terms("git 提交的精确判据", norm) == "git 提交的精确判据"
     assert map_terms("随便查询", norm) == "随便查询"

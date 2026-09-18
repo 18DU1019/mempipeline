@@ -97,7 +97,7 @@ def _raw_terms(s: str) -> list[str]:
 # （快照↔备份 / IRR↔年化 / ETF↔指数基金等语义冲突不合并）见 test_default_synonyms。
 DEFAULT_SYNONYMS: dict[str, list[str]] = {
     "commit": ["提交"],
-    "frontmatter": ["元数据", "metadata"],
+    "frontmatter": ["metadata"],
     "audit": ["审计"],
     "sandbox": ["沙箱"],
     "闭环": ["收尾", "收口"],

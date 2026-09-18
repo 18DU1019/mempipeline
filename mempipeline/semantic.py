@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
-from .recall import MemoryRecall, is_redacted, scan_tier_dirs
+from .recall import DEFAULT_SYNONYMS, MemoryRecall, is_redacted, scan_tier_dirs
 
 OLLAMA_EMBED_URL = "http://127.0.0.1:11434/api/embed"
 EMBED_MODEL = "bge-m3"
@@ -285,7 +285,10 @@ def hybrid_recall(query: str, k: int = 8, mem_root: Path | None = None,
     embed_fn = embed_fn or embed
     if memory is None:
         assert mem_root is not None, "memory 与 mem_root 至少给一个"
-        memory = MemoryRecall(mem_root, tiers=tiers, projects=projects)
+        # AGI-②（2026-09-18）：lexical 腿走默认同义归一（与 panel/调用方注入
+        # 的 MemoryRecall 同口径）；调用方注入实例时以注入方配置为准。
+        memory = MemoryRecall(mem_root, tiers=tiers, projects=projects,
+                              synonyms=DEFAULT_SYNONYMS)
     lex = [p for p, _ in memory.recall(query, k * 3)]
     if index is None:
         return [(p, 1.0 / (i + 1)) for i, p in enumerate(lex[:k])]

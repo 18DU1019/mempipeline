@@ -92,6 +92,42 @@ def _raw_terms(s: str) -> list[str]:
     return [w for w in re.findall(r"[\w\u4e00-\u9fa5]+", s)]
 
 
+# AGI-②（2026-09-18）：默认同义表。head=语料高频形式（317 篇定向 df 实测），
+# alts=查询侧词汇（多为 df=0 的纯查询词或跨语言对）。取舍依据与排除组
+# （快照↔备份 / IRR↔年化 / ETF↔指数基金等语义冲突不合并）见 test_default_synonyms。
+DEFAULT_SYNONYMS: dict[str, list[str]] = {
+    "commit": ["提交"],
+    "frontmatter": ["元数据", "metadata"],
+    "audit": ["审计"],
+    "sandbox": ["沙箱"],
+    "闭环": ["收尾", "收口"],
+    "记忆入库": ["沉淀"],
+    "回撤": ["回吐"],
+    "估值": ["低估值", "低估"],
+}
+
+
+def syn_norm_map(synonyms: dict[str, list[str]] | None) -> dict[str, str]:
+    """head/alts 展平为 term->主词映射；None/空返回空 dict（无归一语义）。"""
+    m: dict[str, str] = {}
+    for head, alts in (synonyms or {}).items():
+        m[head] = head
+        for a in alts:
+            m[a] = head
+    return m
+
+
+def map_terms(query: str, norm: dict[str, str]) -> str:
+    """查询侧整词归一：_raw_terms 切 run 后查映射，以空格重连。
+
+    整词语义：中文连写（如「回吐了多少」）不触发归一，与 _norm_doc 口径一致。
+    空映射原样返回。
+    """
+    if not norm:
+        return query
+    return " ".join(norm.get(t, t) for t in _raw_terms(query))
+
+
 def scan_tier_dirs(mem_root: Path, tier: str,
                    projects: Iterable[str] | None = None) -> list[Path]:
     """返回某 tier 下实际要扫描的目录列表（项目作用域解析）。
@@ -127,11 +163,7 @@ class MemoryRecall(RecallBackend):
         self.tiers = list(tiers)
         self.projects = list(projects) if projects is not None else None
         self.index = index  # 可选倒排快路径；缺省 None = 每查询全库读盘
-        self._norm = {}
-        for head, alts in (synonyms or {}).items():
-            self._norm[head] = head
-            for a in alts:
-                self._norm[a] = head
+        self._norm = syn_norm_map(synonyms)
 
     def _query_terms(self, query: str) -> list[str]:
         return [self._norm.get(t, t) for t in _raw_terms(query)]
@@ -208,8 +240,13 @@ class TFIDFIndex:
     调用方应自行判断回退 MemoryRecall 全扫）。
     """
 
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path,
+                 synonyms: dict[str, list[str]] | None = None):
         self.db_path = db_path
+        # AGI-②（2026-09-18）：同义表驱动查询/文档双侧归一，保持主词空间对等。
+        # 文档侧归一在 build() 落盘（ckey 随归一文本变化，增量重算自动迁移）；
+        # 查询侧归一在 _query_terms。空表时两侧行为与旧版完全一致。
+        self._norm = syn_norm_map(synonyms)
         self.last_vacuum: list[str] = []  # F-vacuum：最近一次 build() 清除的幽灵路径清单（供调用方打印）
         self.last_read_errors: int = 0  # G 项（2026-09-17）：最近一次 build() 读失败计数
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
@@ -249,7 +286,8 @@ class TFIDFIndex:
         from .protocol import TIER_DIR
         if tiers is None:
             tiers = TIER_DIR.values()
-        _norm = norm or _default_norm
+        _norm = norm or (lambda t: map_terms(t, self._norm)
+                         if self._norm else _default_norm(t))
         self.last_read_errors = 0  # G 项：每轮 build 重置读失败计数
         known = {r[0] for r in self._conn.execute("SELECT path FROM doc")}
         known_ckeys = {r[0] for r in self._conn.execute(
@@ -365,7 +403,7 @@ class TFIDFIndex:
         return scored[:k]
 
     def _query_terms(self, query: str) -> list[str]:
-        return [t for t in _raw_terms(query)]
+        return [self._norm.get(t, t) for t in _raw_terms(query)]
 
 
 def _default_norm(text: str) -> str:

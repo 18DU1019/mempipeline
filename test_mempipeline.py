@@ -639,11 +639,59 @@ def test_inject_rules():
         raise AssertionError("test_inject_rules: 子断言失败")
 
 
+def test_default_synonyms():
+    """AGI-②（2026-09-18）：默认同义表——映射展开、整词边界、快路径端到端。
+
+    收录依据：317 篇定向 df（head=语料高频形式：commit 73/frontmatter 36/audit 35/
+    闭环 36/记忆入库 30…；alts 多为 df=0 纯查询词）+ 30 条真实查询日志。
+    排除组（不合并）：快照↔备份 / IRR↔年化 / ETF↔指数基金（语义冲突）。
+    已知边界：整词语义，中文连写（如「提交的精确判据」）不触发归一。
+    """
+    import tempfile
+    from pathlib import Path
+    from mempipeline.recall import (DEFAULT_SYNONYMS, MemoryRecall, TFIDFIndex,
+                                    map_terms, syn_norm_map)
+    from mempipeline.protocol import TIER_DIR
+    norm = syn_norm_map(DEFAULT_SYNONYMS)
+    assert len(DEFAULT_SYNONYMS) == 8, f"默认表应为 8 组 {sorted(DEFAULT_SYNONYMS)}"
+    assert norm["commit"] == "commit" and norm["提交"] == "commit", "head 自映射+alts 归一"
+    # 查询侧整词归一：空格分词的查询触发（真实日志习惯："沙箱 拦截"/"元数据 治理"）
+    assert map_terms("知识库 git 提交 判据", norm) == "知识库 git commit 判据"
+    assert map_terms("元数据 治理", norm) == "frontmatter 治理"
+    # 已知边界：中文连写不触发（整词语义，与 _norm_doc 口径一致）
+    assert map_terms("git 提交的精确判据", norm) == "git 提交的精确判据"
+    assert map_terms("随便查询", norm) == "随便查询"
+    # 端到端（快路径保留）：文档侧 alts 独立成词时归入主词空间，英文查询命中中文文档
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem = tmp / "mem"
+        (mem / TIER_DIR["long"]).mkdir(parents=True)
+        (mem / TIER_DIR["long"] / "n1.md").write_text(
+            "---\ntype: note\ntitle: 判据\nsummary: s\n---\n\ngit 提交 判据：工作树干净。\n",
+            encoding="utf-8")
+        (mem / TIER_DIR["long"] / "n2.md").write_text(
+            "---\ntype: note\ntitle: 无关\nsummary: s\n---\n\n钢琴指法练习记录。\n",
+            encoding="utf-8")
+        idx = TFIDFIndex(tmp / "idx.sqlite", synonyms=DEFAULT_SYNONYMS)
+        assert idx.build(mem) == 2, "两篇文档应全部索引"
+        r = MemoryRecall(mem, index=idx).recall("git commit", k=5)
+        # 字符 ngram 下短 bigram 偶然重叠难免（如 title 的 it），契约是排序正确而非硬过滤
+        assert r and "n1" in r[0][0], f"commit 查询应 top1 命中提交文档 {[(Path(p).name, s) for p, s in r]}"
+        # 反向：中文 alt 查询命中含英文 head 的文档
+        (mem / TIER_DIR["long"] / "n3.md").write_text(
+            "---\ntype: note\ntitle: 流程\nsummary: s\n---\n\npre-commit 钩子先于 commit 运行。\n",
+            encoding="utf-8")
+        assert idx.build(mem) == 1, "增量 build 只收新文档"
+        r2 = MemoryRecall(mem, index=idx).recall("提交 记录", k=5)
+        assert any("n3" in p for p, _ in r2), f"提交 查询应命中 commit 文档 {[p for p, _ in r2]}"
+        idx.close()
+
+
 if __name__ == "__main__":
     _ok = main()
     for _fn in (test_crash_recover_sidecar, test_tfidf_recall, test_recall_golden,
                 test_project_isolation, test_tfidf_index, test_tfidf_vacuum,
-                test_g_error_visibility, test_inject_rules):
+                test_g_error_visibility, test_inject_rules, test_default_synonyms):
         try:
             _fn()
         except AssertionError as _e:

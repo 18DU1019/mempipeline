@@ -179,8 +179,11 @@ class MemoryRecall(RecallBackend):
 
     def recall(self, query: str, k: int = 8) -> list[tuple[str, float]]:
         # return 首元素 = 候选笔记的绝对文件路径（非标题），次元素 = 相似度分，降序。
-        # 快路径：配置了倒排索引且无同义归一（索引按原词构建，归一场景需回落全扫保证口径）
-        if self.index is not None and not self._norm:
+        # 快路径：配置了倒排索引且口径对齐——无归一（索引按原词建），或索引与
+        # 本实例用同一张同义表双侧归一（TFIDFIndex.build 落盘归一文本 + recall
+        # 查询侧归一，与 MemoryRecall 全扫同构，主词空间对等）。异表索引回落全扫。
+        if self.index is not None and (
+                not self._norm or getattr(self.index, "_norm", None) == self._norm):
             try:
                 hits = self.index.recall(query, k=k)
                 if hits:

@@ -688,6 +688,17 @@ def test_default_synonyms():
         assert idx.build(mem) == 1, "增量 build 只收新文档"
         r2 = MemoryRecall(mem, index=idx).recall("提交 记录", k=5)
         assert any("n3" in p for p, _ in r2), f"提交 查询应命中 commit 文档 {[p for p, _ in r2]}"
+        # 快路径同表放行（2026-09-18）：同表注入 MemoryRecall(index, synonyms) 与
+        # 索引口径对等（双侧归一同构），recall() 放行快路径——行为级观测：删除
+        # 镜像文件后仍能召回 = 只扫索引未读盘；异表注入则回落全扫（读不到已删文件）。
+        (mem / TIER_DIR["long"] / "n3.md").unlink()
+        r3 = MemoryRecall(mem, index=idx, synonyms=DEFAULT_SYNONYMS).recall("提交 记录", k=5)
+        assert any("n3" in p for p, _ in r3), f"同表注入应走快路径命中已删镜像 {[p for p, _ in r3]}"
+        other = TFIDFIndex(tmp / "idx2.sqlite", synonyms={})
+        other.build(mem)
+        r4 = MemoryRecall(mem, index=other, synonyms=DEFAULT_SYNONYMS).recall("提交 记录", k=5)
+        assert not any("n3" in p for p, _ in r4), "异表注入应回落全扫（镜像已删不可命中）"
+        other.close()
         idx.close()
 
 

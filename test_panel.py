@@ -7,6 +7,7 @@
 3. /api/transition：candidate→promoted 成功 + 路径穿越拒绝
 4. /api/search：TF-IDF 检索（不依赖 Ollama，语义失败回落）
 5. /api/audit：审计 tail
+6. §8.3 H 项：activity 活跃度分桶 / exposure 曝光分布（纯逻辑层）
 """
 import json
 import sys
@@ -257,10 +258,73 @@ def test_null_audit_transition() -> None:
         raise AssertionError("test_null_audit_transition: 子断言失败")
 
 
+def test_activity_exposure() -> None:
+    """§8.3 H 项：/api/activity 活跃度分桶 + /api/exposure 曝光分布（含未打点降级）。
+
+    HTTP 路由接线与既有端点同构（_json 管道），本测试聚焦纯逻辑层
+    `_activity` / `_exposure`：分桶窗口、latest 提取、未曝光面对账。
+    """
+    ok = True
+
+    def check(cond: bool, msg: str):
+        nonlocal ok
+        tag = "PASS" if cond else "FAIL"
+        print(f"  [{tag}] {msg}")
+        if not cond:
+            ok = False
+
+    from mempipeline.access_log import AccessLog
+    from mempipeline.panel_ops import _activity, _exposure
+    from mempipeline.protocol import Note, TIER_DIR
+    from mempipeline.engine import write_atomic
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem_root = tmp / "mem"
+        (mem_root / TIER_DIR["long"]).mkdir(parents=True)
+        audit = FileAudit(tmp / "audit" / "log.md", tmp / "audit" / "manifest.json",
+                          mem_root)
+        n1 = Note(title="规则", summary="单笔风险≤1ATR", tier="long", importance=0.9,
+                  body="正文。", status="promoted")
+        md = mem_root / TIER_DIR["long"] / "规则-a1.md"
+        write_atomic(md, n1.to_frontmatter() + "\n\n" + n1.body + "\n", audit)
+
+        # activity：updated（DQ 标量 now_iso）当月分桶命中 + latest 提取
+        act = _activity(mem_root)
+        cur = act["months"][-1]
+        check(act["buckets"].get(cur) == 1 and act["total"] == 1,
+              f"activity 当月分桶命中（{act['buckets'].get(cur)}）")
+        check(act["latest"].startswith(cur), f"latest 提取（{act['latest']!r}）")
+        check(act["outside"] == 0, "无窗口外/不可得篇")
+        check(len(act["months"]) == 12, "分桶窗口 12 个月")
+
+        # exposure：未打点降级 + 打点后分布与未曝光面对账
+        check(_exposure(None, mem_root) == {"enabled": False}, "未打点 → enabled=False 降级")
+        al = AccessLog(tmp / "acc.db")
+        al.record([str(md)], source="panel_search")
+        ex = _exposure(al, mem_root, days=30)
+        check(ex["enabled"] and ex["total"] == 1 and ex["distinct"] == 1,
+              f"曝光分布（total={ex['total']}, distinct={ex['distinct']}）")
+        check(ex["unexposed"] == 0 and ex["mirror"] == 1,
+              f"未曝光面对账（unexposed={ex['unexposed']}/{ex['mirror']}）")
+        n2 = Note(title="经验", summary="待审核", tier="long", importance=0.7,
+                  body="正文B。", status="candidate")
+        md2 = mem_root / TIER_DIR["long"] / "经验-b2.md"
+        write_atomic(md2, n2.to_frontmatter() + "\n\n" + n2.body + "\n", audit)
+        ex2 = _exposure(al, mem_root)
+        check(ex2["unexposed"] == 1 and ex2["mirror"] == 2,
+              f"新篇未曝光计入（unexposed={ex2['unexposed']}/{ex2['mirror']}）")
+        al.close()
+    print("\nACTIVITY+EXPOSURE (§8.3 H):", "ALL PASS" if ok else "SOME FAILED")
+    if not ok:
+        raise AssertionError("test_activity_exposure: 子断言失败")
+
+
 if __name__ == "__main__":
     panel_ok = main()
     for _name, _fn in (("SUBMI-DQ", test_submit_dq_roundtrip),
-                       ("NULL_AUDIT", test_null_audit_transition)):
+                       ("NULL_AUDIT", test_null_audit_transition),
+                       ("ACT+EXPO", test_activity_exposure)):
         try:
             _fn()
         except AssertionError as _e:

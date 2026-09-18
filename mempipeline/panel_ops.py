@@ -161,6 +161,69 @@ def _reindex(index, mem_root: Path) -> dict:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
+def _activity(mem_root: Path) -> dict:
+    """记忆活跃度热力（2026-09-18 §8.3 H 项）：updated 月度分桶 + 窗口外数 + 最新一篇。
+
+    月键 = frontmatter updated 前 7 位（YYYY-MM），缺失回落文件 mtime；
+    分桶窗口 = 近 12 个月（含当月），窗口外或时间不可得归 outside。只读。
+    """
+    from datetime import datetime
+
+    from .protocol import TIER_DIR
+    from .recall import scan_tier_dirs
+    today = datetime.now()
+    keys: list[str] = []
+    for i in range(11, -1, -1):
+        y, m = today.year, today.month - i
+        while m <= 0:
+            m += 12
+            y -= 1
+        keys.append(f"{y:04d}-{m:02d}")
+    buckets = {k: 0 for k in keys}
+    outside = 0
+    latest = ""
+    total = 0
+    for tier in TIER_DIR.values():
+        for d in scan_tier_dirs(mem_root, tier, None):
+            for md in d.glob("*.md"):
+                total += 1
+                up = _read_frontmatter(md).get("updated") or ""
+                month = up[:7]
+                if not month:
+                    try:
+                        month = datetime.fromtimestamp(md.stat().st_mtime).strftime("%Y-%m")
+                    except Exception:
+                        month = ""
+                if month in buckets:
+                    buckets[month] += 1
+                else:
+                    outside += 1
+                latest = max(latest, up)  # 定宽 ISO 串，字典序即时间序
+    return {"months": keys, "buckets": buckets, "outside": outside,
+            "latest": latest, "total": total}
+
+
+def _exposure(access_log, mem_root: Path, days: int = 30) -> dict:
+    """曝光分布观测（2026-09-18 §8.3 H 项，AMV-P1 口径）：近 N 天曝光 + 未曝光面。
+
+    access_log 为 None → enabled=False 降级（面板未配置打点 sidecar 场景）。
+    未曝光面 = 镜像全量路径中从未出现在 exposure 表的篇数。只读，不进评分链路。
+    """
+    if access_log is None:
+        return {"enabled": False}
+    from .protocol import TIER_DIR
+    from .recall import scan_tier_dirs
+    paths: list[str] = []
+    for tier in TIER_DIR.values():
+        for d in scan_tier_dirs(mem_root, tier, None):
+            paths += [str(md) for md in d.glob("*.md")]
+    dist = access_log.distribution(days)
+    return {"enabled": True, "days": days, "since": dist["since"],
+            "total": dist["total"], "distinct": dist["distinct"],
+            "top": dist["top"], "mirror": len(paths),
+            "unexposed": len(access_log.unexposed(paths))}
+
+
 def _json(handler, obj: dict, status: int = 200) -> None:
     body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)

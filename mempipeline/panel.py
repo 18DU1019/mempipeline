@@ -9,6 +9,8 @@
 - GET  /api/search?q=&project=&k= → hybrid_recall（语义失败自动回落 TF-IDF）
 - GET  /api/browse?page=&limit= → 全量记忆浏览（分页，按更新时间倒序）
 - GET  /api/index_status → 语义索引 vs 镜像篇数
+- GET  /api/activity → 记忆活跃度热力（updated 月度分桶 + 窗口外数 + 最新一篇）
+- GET  /api/exposure?days= → 曝光分布（近 N 天 top + 未曝光面，AMV-P1 观测面）
 - POST /api/transition {path, to} → governance.transition（仅 candidate→promoted /
   candidate→rejected，路径校验在 mem_root 内，防穿越）
 - POST /api/submit {title, content, tier, project} → 面板投稿到 staging 投稿位
@@ -28,8 +30,10 @@ from pathlib import Path
 from .audit import NullAudit
 from .governance import review_queue, transition
 from .panel_ops import (
+    _activity,
     _audit_tail,
     _browse,
+    _exposure,
     _index_status,
     _json,
     _read_frontmatter,
@@ -418,6 +422,11 @@ class _Handler(BaseHTTPRequestHandler):
             _json(self, _browse(self.mem_root, page, limit))
         elif path == "/api/index_status":
             _json(self, _index_status(self.semantic_index, self.mem_root))
+        elif path == "/api/activity":
+            _json(self, _activity(self.mem_root))
+        elif path == "/api/exposure":
+            days = min(max(int(qs.get("days", ["30"])[0]), 1), 365)
+            _json(self, _exposure(self.access_log, self.mem_root, days))
         else:
             _json(self, {"error": "not found"}, 404)
 

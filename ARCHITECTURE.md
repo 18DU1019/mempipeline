@@ -139,3 +139,11 @@
 | bridge.py | 1 | :53 保留（桥导出读失败兜底） |
 
 合计 36 = 收敛 4 + 保留 32。
+
+### 8.3 H 项立项（2026-09-18，AGI 记忆借鉴三候选之①落地）
+
+> 缘起：AGI 记忆系统借鉴分析产出三候选，经用户排期拍板：①面板监控三块先做（编号 H 续接 §8.1）；②TF-IDF 同义词表待用户确认词表内容后另立项；③JUDGE 权重离线坐标搜索缓挂（判定数据积累满 3 次阈值前无 delta，recall_judge 观察期内不动权重）。
+
+| 项 | 内容 | 执行侧 | 口径 / 红线 | 验收 |
+|---|---|---|---|---|
+| H 面板监控三块（召回质量/索引新鲜度/活跃度） | panel 新增只读端点：`/api/activity`（updated 月度分桶近 12 月 + 窗口外数 + latest，mtime 兜底）、`/api/exposure?days=`（AccessLog.distribution + 未曝光面对账）；索引新鲜度复用既有 `/api/index_status`（indexed vs mirror gap），不重复造。纯逻辑落 panel_ops（B5 分层），panel.py 只接线；hub :8791 加「记忆监控」展示卡消费三端点（展示层归 hub，对齐「运维监控已迁 :8791」既有决策） | 公司机 A | 只读观测，不写任何文件、不进评分链路（AMV-P1 口径延续：sidecar 先记录不消费）；exposure 未配置 sidecar 时降级 `enabled=false` 不报错；时间基准 naive 本地（与 access_log.record/now_iso 同口径，不引入 tz 分叉） | test_panel.test_activity_exposure（分桶窗口/latest 提取/未曝光对账/降级 8 断言）；test_panel 套全绿 |

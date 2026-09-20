@@ -157,23 +157,12 @@ def subject_key(title: str, summary: str = "", *,
     return "|".join(sorted(set(keep)))
 
 
-def _norm(s: str) -> str:
-    return "".join(s.split())
-
-
-def _bigrams(s: str) -> set[str]:
-    n = _norm(s)
-    return {n[i:i + 2] for i in range(len(n) - 1)}
-
-
-def _jaccard(a: set[str], b: set[str]) -> float:
-    if not a or not b:
-        return 0.0
-    return len(a & b) / len(a | b)
-
-
 def summary_similarity(a: str, b: str) -> float:
-    """两条摘要的字符 bigram Jaccard 相似度（中文无需分词即稳健）。"""
+    """两条摘要的字符 bigram Jaccard 相似度（中文无需分词即稳健）。
+
+    实现收敛自 recall._bigrams/_jaccard（检验报告第五-2，原三处逐字拷贝）。
+    """
+    from .recall import _bigrams, _jaccard
     return _jaccard(_bigrams(a), _bigrams(b))
 
 

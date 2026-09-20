@@ -21,7 +21,7 @@ from typing import Iterable
 from .protocol import _fmt_scalar, unquote
 from .engine import write_atomic
 from .audit import AuditBackend
-from .recall import scan_tier_dirs
+from .recall import _bigrams, _jaccard, scan_tier_dirs
 
 WIKILINK_MAX = 8    # 每条笔记最多挂的交叉引用数（对应 AMV 的 top-K）
 MIN_SCORE = 0.05    # 相似度下限（bigram Jaccard）：零/极低重叠的直接丢弃
@@ -34,22 +34,6 @@ def _norm_text(md: Path) -> str:
         return "".join(md.read_text(encoding="utf-8").split())
     except Exception:
         return ""
-
-
-def _norms(s: str) -> str:
-    return "".join(s.split())
-
-
-def _bigrams(s: str) -> set[str]:
-    """取相邻 2 字符的集合。中文无需分词即稳健：子串（标点看似不同）仍共享词内 bigram。"""
-    n = _norms(s)
-    return {n[i:i + 2] for i in range(len(n) - 1)}
-
-
-def _jaccard(a: set[str], b: set[str]) -> float:
-    if not a or not b:
-        return 0.0
-    return len(a & b) / len(a | b)
 
 
 def _title_of(md: Path) -> str:

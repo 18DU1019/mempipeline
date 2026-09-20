@@ -273,6 +273,11 @@ def main() -> bool:
     check(summary_similarity("取消堂食只做外带", "出餐口到餐桌要短") < DRIFT_THRESHOLD,
           "大改摘要 < 漂移阈值")
     check(GAP_DAYS == 90, "断更阈值默认 90 天（显式常量）")
+    # ---- (bonus) 收敛源锁定：bigram/Jaccard 共用 recall 实现（检验报告第五-2）----
+    from mempipeline.recall import _bigrams, _jaccard
+    check(_jaccard(_bigrams("出餐口到餐桌要短"), _bigrams("出餐口到餐桌要短")) == 1.0
+          and _jaccard(_bigrams("abc"), _bigrams("def")) == 0.0,
+          "recall._bigrams/_jaccard 为 timegrap/crossref 共享源")
 
     print("\nTIMEGRAP (P2):", "ALL PASS" if ok else "SOME FAILED")
     return ok

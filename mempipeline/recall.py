@@ -4,8 +4,9 @@
 开源解释：RecallBackend 是所有读取入口的接口。MemoryRecall 用「查询 ngram
 TF-IDF」做相关度打分：把 query 与候选笔记都切成 2-4 字字符 ngram（中文无分词
 稳健），IDF 抑制全库通用词以提升区分度；synonyms 把同义词归一为主词后再匹配。
-打分核心只服务 recall；交叉引用（crossref）用独立 bigram Jaccard，两处为不同
-相似度策略，不共用核心。层目录默认取自 protocol.TIER_DIR。
+打分核心只服务 recall；交叉引用（crossref）与时间图谱（timegrap）用独立
+bigram Jaccard（策略边界，不共用打分核心；_bigrams/_jaccard 为三处共用的
+文本工具，收敛自逐字拷贝，见检验报告第五-2）。层目录默认取自 protocol.TIER_DIR。
 """
 from __future__ import annotations
 
@@ -471,3 +472,20 @@ class TFIDFIndex:
 
 def _default_norm(text: str) -> str:
     return text
+
+
+def _bigrams(s: str) -> set[str]:
+    """取去空白后相邻 2 字符的集合（中文无需分词即稳健：子串标点不同仍共享词内 bigram）。
+
+    收敛自 crossref._norms/_bigrams 与 timegrap._norm/_bigrams 的逐字拷贝
+    （检验报告第五-2）；与 ngram TF-IDF 是两套独立相似度策略，本函数仅作
+    共用文本工具，不参与 recall 打分核心。
+    """
+    n = "".join(s.split())
+    return {n[i:i + 2] for i in range(len(n) - 1)}
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)

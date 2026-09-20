@@ -272,10 +272,46 @@ class TFIDFIndex:
             "(gram TEXT NOT NULL, df REAL NOT NULL)")
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_gram ON gram(gram)")
+        # P0-1 真倒排：docgram 关联表（gram→path 多对多）。recall 以 SQL 预筛
+        # 候选文档（含任一查询 ngram），不再全表拉 doc 后 Python 过滤（原实现
+        # 注释称"只扫描命中 ngram 的文档"实为全表拉取，属伪倒排）。主键
+        # (gram, path) 的前缀索引天然覆盖「按 gram 取 path」的候选查询。
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS docgram "
+            "(gram TEXT NOT NULL, path TEXT NOT NULL,"
+            " PRIMARY KEY (gram, path))")
         self._conn.commit()
+        # schema 迁移（P0-1）：docgram 为纯派生表。doc 已有数据而 docgram 为空
+        # （旧库升级 / 异常中断残留）时从 doc 表全量回填，保证 recall 候选集
+        # 不塌缩为空（否则旧库索引会静默零召回）。
+        dg_n = self._conn.execute("SELECT COUNT(*) FROM docgram").fetchone()[0]
+        dd_n = self._conn.execute("SELECT COUNT(*) FROM doc").fetchone()[0]
+        if dg_n == 0 and dd_n > 0:
+            self._rebuild_docgram()
 
     def close(self) -> None:
         self._conn.close()
+
+    def _rebuild_docgram(self) -> int:
+        """从 doc 表 ngrams 全量重建 docgram 关联表（派生表回填，幂等）。
+
+        旧库升级 / docgram 与 doc 失步时由 __init__ 触发；亦可由 build() 复用
+        作失步修复。返回写入行数（= gram 去重后的文档 gram 对总数）。
+        """
+        self._conn.execute("DELETE FROM docgram")
+        pairs: list[tuple[str, str]] = []
+        for path, ngrams_str in self._conn.execute(
+                "SELECT path, ngrams FROM doc"):
+            for pair in ngrams_str.split():
+                if ":" in pair:
+                    g = pair.split(":", 1)[0]
+                    pairs.append((g, path))
+        if pairs:
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO docgram (gram, path) VALUES (?,?)",
+                pairs)
+        self._conn.commit()
+        return len(pairs)
 
     def count(self) -> int:
         return self._conn.execute("SELECT COUNT(*) FROM doc").fetchone()[0]
@@ -331,23 +367,32 @@ class TFIDFIndex:
         # P3.12 红act：从倒排剔除已 redacted 的旧索引条目（否则倒排仍残留该秘文）。
         # 必须在「新文档为空即早退」之前执行，保证重建索引仅剔除脱敏稿时也生效。
         # F-vacuum：幽灵路径与红act剔除同批 DELETE + 一次 commit（原子）。
+        # P0-1：doc 删除须同步删 docgram（派生表失步会让候选集指向幽灵路径）。
         if drop_paths:
             for p in drop_paths:
                 self._conn.execute("DELETE FROM doc WHERE path=?", (p,))
+                self._conn.execute("DELETE FROM docgram WHERE path=?", (p,))
         if vacuum_paths:
             for p in vacuum_paths:
                 self._conn.execute("DELETE FROM doc WHERE path=?", (p,))
+                self._conn.execute("DELETE FROM docgram WHERE path=?", (p,))
         self.last_vacuum = vacuum_paths
         if drop_paths or vacuum_paths:
             self._conn.commit()
         if not docs and not drop_paths and not vacuum_paths:
             return 0
-        # 文档级写入
+        # 文档级写入（doc 与 docgram 同批提交，保持派生表同步）
+        dg_pairs: list[tuple[str, str]] = []
         for path, _ckey, norms, grams, ln in docs:
             self._conn.execute(
                 "INSERT OR REPLACE INTO doc (path, ckey, norm, ngrams) VALUES (?,?,?,?)",
                 (path, _ckey, norms, " ".join(
                     f"{g}:{c}" for g, c in grams.items())))
+            dg_pairs.extend((g, path) for g in grams)
+        if dg_pairs:
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO docgram (gram, path) VALUES (?,?)",
+                dg_pairs)
         # gram 级 df（全量重算）：doc 表含历史已索引文档，逐批 REPLACE 会丢失旧批
         # 贡献导致 idf 随增量 build 漂移，故每轮从 doc 表全量统计，语义恒等于全库。
         df: dict[str, int] = {}
@@ -368,9 +413,11 @@ class TFIDFIndex:
         """查询归一后切 ngram，按 TF-IDF 打分取 Top-K。
 
         - 查询归一（同 MemoryRecall._query_terms）保持主词空间对等；
-        - 只扫描 doc 表（内存中 ngrams 计数 + norm 长度），不触碰镜像文件，
-          也无需重算全库 IDF（已预先落 gram 表）；
-        - 仅对含至少一个查询 ngram 的文档计分，其余跳过。
+        - P0-1 真倒排：docgram 关联表以 SQL 预筛含任一查询 ngram 的候选文档
+          （候选集 = 旧「any(g in grams)」过滤的 SQL 等价），再只对候选读 doc
+          表打分，不触碰镜像文件，也无需重算全库 IDF（已预先落 gram 表）；
+        - 打分逻辑与旧全表扫描逐行同构（同一 _score_tfidf、同一过滤条件），
+          保证与 MemoryRecall 全扫基准结果完全一致（双路径一致性测试守住）。
         """
         qterms = self._query_terms(query)
         if not qterms:
@@ -387,19 +434,34 @@ class TFIDFIndex:
                 "SELECT df FROM gram WHERE gram=?", (g,)).fetchall()
             if rows:
                 idf[g] = rows[0][0]
+        # P0-1：SQL 候选预筛（真倒排）。docgram 主键 (gram, path) 前缀索引
+        # 覆盖本查询；候选集为空即无命中，直接返回，无需触碰 doc 表。
+        cand: set[str] = set()
+        for g in set(qfreq):
+            for (path,) in self._conn.execute(
+                    "SELECT path FROM docgram WHERE gram=?", (g,)):
+                cand.add(path)
+        if not cand:
+            return []
         scored: list[tuple[str, float]] = []
-        for path, norms, ngrams_str in self._conn.execute(
-                "SELECT path, norm, ngrams FROM doc"):
-            grams: dict[str, float] = {}
-            for pair in ngrams_str.split():
-                if ":" in pair:
-                    g, c = pair.split(":", 1)
-                    grams[g] = float(c)
-            if not any(g in grams for g in qfreq):
-                continue
-            s = _score_tfidf(qfreq, qmax, idf, Counter(grams), len(norms))
-            if s > 0:
-                scored.append((path, s))
+        # 候选 doc 分批 IN 查询打分（每批 500，远低于 SQLite 变量数上限 999）
+        paths = sorted(cand)
+        for i in range(0, len(paths), 500):
+            chunk = paths[i:i + 500]
+            ph = ",".join("?" * len(chunk))
+            for path, norms, ngrams_str in self._conn.execute(
+                    f"SELECT path, norm, ngrams FROM doc WHERE path IN ({ph})",
+                    chunk):
+                grams: dict[str, float] = {}
+                for pair in ngrams_str.split():
+                    if ":" in pair:
+                        g, c = pair.split(":", 1)
+                        grams[g] = float(c)
+                if not any(g in grams for g in qfreq):
+                    continue
+                s = _score_tfidf(qfreq, qmax, idf, Counter(grams), len(norms))
+                if s > 0:
+                    scored.append((path, s))
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:k]
 

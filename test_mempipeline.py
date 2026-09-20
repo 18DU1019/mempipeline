@@ -626,6 +626,11 @@ def test_inject_rules():
               "activity_date 链 last_active>created>updated + days 计算")
         check(_layer_of(Path(r"x/02-中期记忆/a.md")) == "02-中期记忆"
               and _layer_of(Path(r"x/other/a.md")) == "01-长期记忆", "_layer_of 判层")
+        # 精确段判定锁定（检验报告第五-4 核实：`folder in pp.parts` 为精确段匹配，
+        # 非子串包含——`02-中期记忆-旧` 这类含子串的目录不应误判为中期层）
+        check(_layer_of(Path(r"x/02-中期记忆-旧/a.md")) == "01-长期记忆"
+              and _layer_of(Path(r"x/01-长期记忆-备份/a.md")) == "01-长期记忆",
+              "_layer_of 精确段匹配（含子串目录不误判）")
 
         # warmup 升序 + abstain + 读失败计数
         check(len(r["warmup"]) >= 2 and r["warmup"][0]["days"] <= r["warmup"][-1]["days"],

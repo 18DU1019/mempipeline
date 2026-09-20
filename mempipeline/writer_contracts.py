@@ -30,6 +30,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .protocol import parse_frontmatter
+
 # ---- 写者契约注册表（单一事实源：约束在此声明，各写者引用而非重实现） ----
 WRITER_CONTRACTS: dict[str, dict[str, Any]] = {
     # distill_memory：TRAE 记忆单向蒸馏镜像，人工策展，**可**被治理建议覆盖
@@ -73,11 +75,15 @@ def _fm_blocks(text: str) -> list[str]:
 
 
 def _field_value(fm: str, key: str) -> str:
-    # 行锚定取值：`(.+)$` 的 `$` 锚定行尾；冒号后空白用 `[ \t]*` 而非 `\s*`，
-    # 因为 `\s` 含换行——`project_id:\s*(.+)$` 会把 `project_id: `(空) 的下一行
-    # `confidence_perception: 0.9` 吞成 project_id 值，导致缺 project_id 判定失效。
-    m = re.search(rf"(?m)^{key}:[ \t]*(.+)$", fm)
-    return m.group(1).strip().strip("\"'") if m else ""
+    """从 frontmatter 块文本读某字段值（P1：统一走 protocol.parse_frontmatter）。
+
+    与旧实现的行为差异（方案第六节接受并修正）：
+    - 旧实现只 strip 引号不反转义 DQ 序列；新实现经 unquote 反转义，
+      与写侧 _fmt_scalar 闭环（实际读取字段 writer_id/memory_tier/project_id 不含转义，影响面≈0）；
+    - 空值/缺键均返回 ""（旧实现同）；
+    - 行锚定防跨行吞值（旧实现靠 [ \t]*，现由解析器统一保证）。
+    """
+    return parse_frontmatter(f"---\n{fm}\n---").get(key, "")
 
 
 def writer_of(text: str) -> str | None:

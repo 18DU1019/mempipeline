@@ -19,15 +19,12 @@ rel 达实质重叠线（W_S·0.5）时 ×RULE_REL_BOOST 上浮，无关时不�
 from __future__ import annotations
 
 import math
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
-from .protocol import unquote
+from .protocol import parse_frontmatter
 from .recall import _tokens, is_redacted, scan_tier_dirs
-
-_FM_RE = re.compile(r"^---\s*\n(.*?)\n---", re.S)
 
 W_R, LAMBDA, W_I, W_S = 0.4, 0.05, 0.4, 0.2  # 正本字面常数，勿改
 LAYER_IMP = {"01-长期记忆": 0.9, "02-中期记忆": 0.6, "01-规则": 0.9}
@@ -39,21 +36,13 @@ RULE_LAYER = "01-规则"
 
 
 def _fm_all(raw: str) -> dict:
-    """全键 frontmatter 解析（k: v 逐行收齐 + unquote）。
+    """全键 frontmatter 解析（P4：统一走 protocol.parse_frontmatter）。
 
-    panel_ops._read_frontmatter 是白名单特化（无 last_active/created/
-    tag_relevance），注入面需要活跃度链全键，故自持解析；文本已读出后纯
-    内存操作不再触盘。
+    与旧实现的差异：旧实现跳过空值行（空值键不在 dict）；新解析器空值键 = ""。
+    inject 读取 title/summary/tag_relevance 等活跃度链字段，调用点均以真值/
+    get 默认值消费，"" 与缺键行为一致。
     """
-    m = _FM_RE.match(raw)
-    if not m:
-        return {}
-    out: dict = {}
-    for ln in m.group(1).splitlines():
-        mm = re.match(r"^\s*([A-Za-z_][\w-]*):\s*(.*)$", ln)
-        if mm and mm.group(2).strip():
-            out[mm.group(1)] = unquote(mm.group(2).strip())
-    return out
+    return parse_frontmatter(raw)
 
 
 def _body_after_fm(raw: str) -> str:

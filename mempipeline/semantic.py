@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
+from .protocol import parse_frontmatter
 from .recall import DEFAULT_SYNONYMS, MemoryRecall, is_redacted, scan_tier_dirs
 
 OLLAMA_EMBED_URL = "http://127.0.0.1:11434/api/embed"
@@ -52,10 +53,37 @@ def cos_sim(a: list[float], b: list[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
+def _fm_time(path: str) -> float | None:
+    """读 frontmatter 的 updated/created 时间戳（epoch 秒）。None = 无可用时点。
+
+    updated 优先（活跃度正源，protocol 写侧实时字段），created 兜底；两字段
+    缺失或 ISO 解析失败（date-only / 带时区 / 任意坏格式）时返回 None 交
+    调用方回落 mtime。created 是后加字段且存量笔记普遍缺失（protocol 注释
+    实测 0/225），故不能只看 created。
+    """
+    try:
+        txt = Path(path).read_text(encoding="utf-8")
+    except Exception:
+        return None
+    fm = parse_frontmatter(txt)
+    for k in ("updated", "created"):
+        v = fm.get(k)
+        if not v:
+            continue
+        try:
+            return datetime.fromisoformat(v).timestamp()
+        except ValueError:
+            continue
+    return None
+
+
 def time_factor(path: str, now: float, half_life_days: int = 90,
                 strategy: str = "exponential") -> float:
-    """记忆时新度信号（C2/D1）：按文件 mtime 衰减 0..1，缺 mtime 返回中性 0.5。
+    """记忆时新度信号（C2/D1）：按内容时点衰减 0..1，缺时点返回中性 0.5。
 
+    时点来源优先级（P1-4）：frontmatter updated → created → 文件 mtime 兜底。
+    frontmatter 时点免疫 git checkout/同步/归档对 mtime 的扰动（检验报告
+    P1-4 对标差距）。其余语义与旧版完全一致：
     对齐 act.advise_retention 的半衰期口径（默认 90 天，与 timegrap 断更阈值一致），
     使「检索时效」与「去留效用」使用同一时间语义。该因子是可选信号：
     hybrid_recall(time_weight>0) 时以 ``score *= factor ** time_weight`` 注入排序，
@@ -68,11 +96,13 @@ def time_factor(path: str, now: float, half_life_days: int = 90,
     不引入未核实论文的 Weibull 形式（SSGM 原文待核，避免宣称为其等价物）。
     非法 strategy 回落 exponential。
     """
-    try:
-        m = Path(path).stat().st_mtime
-    except Exception:
-        return 0.5
-    days = max(0.0, (now - m) / 86400.0)
+    ts = _fm_time(path)
+    if ts is None:
+        try:
+            ts = Path(path).stat().st_mtime
+        except Exception:
+            return 0.5
+    days = max(0.0, (now - ts) / 86400.0)
     hl = max(1, half_life_days)
     if strategy == "linear":
         return max(0.0, 1.0 - days / (2.0 * hl))

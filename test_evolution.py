@@ -165,6 +165,49 @@ def main() -> bool:
     check(time_factor("missing_mtime_file", now_t, 90, strategy="bogus") == 0.5,
           "非法策略回落 exponential 且缺 mtime 中性")
 
+    # ---- P1-4 time_factor frontmatter 优先（updated > created > mtime 兜底）----
+    print("== P1-4 time_factor frontmatter 优先 ==")
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td)
+        now_t = time.time()
+        # 1. updated 优先：frontmatter updated 很旧 + mtime=now → 因子低（按 updated）
+        f_upd = p / "fm-updated.md"
+        f_upd.write_text(f'---\ntitle: "t"\nupdated: "{_iso(300)}"\n---\n\nbody\n',
+                         encoding="utf-8")
+        os_utime(f_upd, now_t)
+        fu = time_factor(f_upd, now_t, 90)
+        check(fu < 0.2, f"updated 优先于 mtime（updated 300 天前 → 因子低，实得 {fu:g}）")
+        # 2. created 兜底（无 updated）：同样 mtime=now → 因子低（按 created）
+        f_cre = p / "fm-created.md"
+        f_cre.write_text(f'---\ntitle: "t"\ncreated: "{_iso(300)}"\n---\n\nbody\n',
+                         encoding="utf-8")
+        os_utime(f_cre, now_t)
+        fc = time_factor(f_cre, now_t, 90)
+        check(0 < fc < 0.2, f"created 兜底：无 updated 按 created 衰减（实得 {fc:g}）")
+        # 3. updated 优先于 created：双字段在且 updated 新 → 因子高
+        f_both = p / "fm-both.md"
+        f_both.write_text(f'---\ntitle: "t"\ncreated: "{_iso(300)}"\n'
+                          f'updated: "{_iso(1)}"\n---\n\nbody\n', encoding="utf-8")
+        os_utime(f_both, now_t)
+        fb = time_factor(f_both, now_t, 90)
+        check(fb > 0.99, f"updated 优先于 created（updated 新 → 因子高，实得 {fb:g}）")
+        # 4. 坏 ISO 回落 mtime（mtime=now → 因子接近 1，且显著高于 updated=300d 档）
+        f_bad = p / "fm-bad.md"
+        f_bad.write_text('---\ntitle: "t"\nupdated: "不是日期"\n---\n\nbody\n',
+                         encoding="utf-8")
+        os_utime(f_bad, now_t)
+        fbad = time_factor(f_bad, now_t, 90)
+        check(fbad > 0.9 and fbad > fu,
+              f"坏日期回落 mtime（实得 {fbad:g}，updated 档 {fu:g}）")
+        # 5. date-only 形态可解析并衰减
+        f_dt = p / "fm-dateonly.md"
+        old_day = (datetime.now() - timedelta(days=120)).strftime("%Y-%m-%d")
+        f_dt.write_text(f'---\ntitle: "t"\ncreated: "{old_day}"\n---\n\nbody\n',
+                        encoding="utf-8")
+        os_utime(f_dt, now_t)
+        check(time_factor(f_dt, now_t, 90) < 0.5,
+              "date-only 形态可解析并按 created 衰减")
+
     # ---- D2 forget_quality 遗忘质量快照 ----
     print("== D2 forget_quality ==")
     with tempfile.TemporaryDirectory() as td:

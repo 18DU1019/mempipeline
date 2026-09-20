@@ -19,6 +19,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Iterable
 
+from .protocol import parse_frontmatter
+
 
 class RecallBackend(ABC):
     @abstractmethod
@@ -31,18 +33,14 @@ _STOPCHARS = frozenset("的了在是我你他她它与和及或对为从到个�
 
 
 def is_redacted(text: str) -> bool:
-    """判读一条笔记 frontmatter `status` 是否为 redacted（P3.12 检索切断）。
+    """判读一条笔记 frontmatter `status` 是否为 redacted（P5：统一走 protocol 解析器）。
 
     红act 的软终态标记；命中即从「活跃可检索」面剔除。无 frontmatter /
-    status 非 redacted 一律返回 False（不误伤存量笔记）。
+    status 非 redacted 一律返回 False（不误伤存量笔记）。与旧实现的差异：
+    旧实现只 strip 引号不反转义；新实现经 unquote，`"redacted"` 与 `redacted`
+    两形态解析一致（行为快照测试 8 覆盖）。
     """
-    m = re.match(r"^---\s*\n(.*?)\n---", text, re.S)
-    if not m:
-        return False
-    mm = re.search(r"(?m)^\s*status:\s*(.+)$", m.group(1))
-    if not mm:
-        return False
-    return mm.group(1).strip().strip("\"'") == "redacted"
+    return parse_frontmatter(text).get("status") == "redacted"
 
 
 def _tokens(text: str) -> list[str]:

@@ -66,12 +66,13 @@ def _upsert_status(text: str, status: str) -> str:
 
 
 def _read_fm_value(fm: str, key: str) -> str | None:
-    """从 frontmatter 文本读某字段的标量值（剥引号+反转义 DQ），缺省 None。"""
-    from ..protocol import unquote
-    mm = re.search(r"(?m)^\s*" + key + r":\s*(.+?)\s*$", fm)
-    if not mm:
-        return None
-    return unquote(mm.group(1).strip())
+    """从 frontmatter 块文本读某字段标量值（P3：统一走 protocol.parse_frontmatter）。
+
+    缺键返回 None（fm.get 缺键语义）；空值行返回 ""（与旧实现 None 的差异仅
+    影响 `is None` 直判，各调用点均以 or/falsy 兜底，结果不变）。
+    """
+    from ..protocol import parse_frontmatter
+    return parse_frontmatter(f"---\n{fm}\n---").get(key)
 
 
 def filter_note(fm: dict) -> tuple[bool, str]:
@@ -127,14 +128,10 @@ def transition(note_path: Path, to_state: str, audit: AuditBackend,
         text = note_path.read_text(encoding="utf-8")
     except Exception as exc:
         return f"read_error:{exc}", ""
-    m = _FM_RE.match(text)
-    cur = "draft"
-    if m:
-        mm = re.search(r"(?m)^\s*status:\s*(.+)$", m.group(1))
-        if mm:
-            val = mm.group(1).strip().strip('"\'')
-            if val in STATES:
-                cur = val
+    from ..protocol import parse_frontmatter
+    cur = parse_frontmatter(text).get("status", "draft")
+    if cur not in STATES:
+        cur = "draft"
     if to_state not in VALID_TRANSITIONS.get(cur, set()):
         return "invalid_transition", cur
     new_text = _upsert_status(text, to_state)

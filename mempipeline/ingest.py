@@ -12,40 +12,34 @@ from typing import Callable
 
 from .protocol import (DEFAULT_TIER, DEFAULT_TRUSTED_AGENTS, TIER_DIR,
                        Note, cap_trust, content_key, normalize_trust,
-                       safe_project_id, strip_frontmatter, title_token, unquote)
+                       parse_frontmatter, safe_project_id, strip_frontmatter,
+                       title_token)
 from .engine import write_atomic
 from .audit import AuditBackend
 from .writer_contracts import baseline_trust_of
 
 
 def _parse_fm(text: str) -> dict:
-    import re
-    text = text.lstrip("\ufeff \t\r\n")
-    m = re.match(r"^---\s*\n(.*?)\n---", text, re.S)
-    if not m:
-        return {}
-    body = m.group(1)
-    out = {}
+    """解析首个 frontmatter 块为投稿字段 dict（P2：统一走 protocol.parse_frontmatter）。
 
-    def get(k):
-        mm = re.search(rf"^\s*{k}:\s*(.+)$", body, re.M)
-        if not mm:
-            return None
-        # 契约强制双引号：统一经 protocol.unquote 剥引号并反转义 DQ 序列
-        # （与 protocol._fmt_scalar 闭环）。
-        return unquote(mm.group(1).strip())
-
-    out["title"] = get("title")
-    out["summary"] = get("summary")
-    out["tier"] = get("memory_tier")
-    out["source_agent"] = get("source_agent") or "workbuddy"
-    out["writer_id"] = get("writer_id")
-    out["project_id"] = get("project_id")
-    out["domain"] = get("domain")
-    out["kind"] = get("kind")
-    out["created"] = get("created")
-    out["trust"] = get("trust")  # P0：显式信任标记（投稿可选），写侧落盘
-    return out
+    白名单特化：只取 ingest 关心的键；缺键 None（fm.get 天然 None）、空值 ""。
+    保留 BOM/前导空白容忍（解析器内置）。与旧实现的差异：
+    - 旧实现的值捕获对空值行会跨行吞下一行；新解析器行锚定，杜绝（行为修正）；
+    - 缺键/空值对 `or "untitled"` / `or "workbuddy"` 回落语义不变（均为 falsy）。
+    """
+    fm = parse_frontmatter(text)
+    return {
+        "title": fm.get("title"),
+        "summary": fm.get("summary"),
+        "tier": fm.get("memory_tier"),
+        "source_agent": fm.get("source_agent") or "workbuddy",
+        "writer_id": fm.get("writer_id"),
+        "project_id": fm.get("project_id"),
+        "domain": fm.get("domain"),
+        "kind": fm.get("kind"),
+        "created": fm.get("created"),
+        "trust": fm.get("trust"),
+    }
 
 
 def ingest(staging_dir: Path, mem_root: Path, tier_dirs: dict[str, str] | None,

@@ -64,6 +64,42 @@ def now_iso() -> str:
     return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
+# --- 读侧契约：与写侧 _fmt_scalar/unquote 闭环（P0 frontmatter 解析收敛）---
+# 值捕获用 [ \t]*（不含换行）+ 逐行锚定，杜绝跨行吞值
+# （writer_contracts 历史 bug 语义为真源：`\s*` 含换行会贪婪吃掉空值行的换行）。
+# (?m) 使 ^ 锚定行首，findall 才能收齐全部 frontmatter 块（writer_contracts 语义）。
+_FM_RE = re.compile(r"(?m)^---\s*\n(.*?)\n---\s*\n?", re.S)
+_FM_LINE_RE = re.compile(r"^([A-Za-z_][\w-]*):[ \t]*(.*)$")
+
+
+def parse_frontmatter(text: str) -> dict[str, str]:
+    """解析首个 frontmatter 块 → {key: 反转义值}。
+
+    行为规格（对齐全部既有语义的并集）：
+    - 无 frontmatter / 块不闭合 → 空 dict（不抛错）；
+    - 容忍 BOM/前导空白（ingest 专属语义上收）；
+    - 键名限字母/下划线/数字/连字符，正文行不误当键（inject 语义）；
+    - 值经 unquote 剥引号+反转义 DQ 序列，单引号只剥不反转义（protocol 既有契约）；
+    - 空值（`key:` 后无内容）→ 值 ""，绝不吞下一行（行锚定）；
+    - 只返回实际存在的键，缺键 = key 不在 dict（None 语义由消费者 fm.get() 天然获得）。
+    """
+    text = text.lstrip("\ufeff \t\r\n")
+    m = _FM_RE.match(text)
+    if not m:
+        return {}
+    out: dict[str, str] = {}
+    for ln in m.group(1).splitlines():
+        mm = _FM_LINE_RE.match(ln)
+        if mm:
+            out[mm.group(1)] = unquote(mm.group(2).strip())
+    return out
+
+
+def parse_frontmatter_blocks(text: str) -> list[dict[str, str]]:
+    """全部 frontmatter 块（writer_contracts._fm_blocks 的 findall 语义）。"""
+    return [parse_frontmatter(f"---\n{b}\n---") for b in _FM_RE.findall(text)]
+
+
 def _fmt_scalar(v: str) -> str:
     """把字符串值编码为 YAML 双引号标量（无条件引号）。
 

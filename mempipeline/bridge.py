@@ -28,7 +28,8 @@ import re
 from pathlib import Path
 from typing import Callable, Iterable
 
-from .protocol import _fmt_scalar, content_key, now_iso, safe_project_id, strip_frontmatter, title_token, unquote
+from .protocol import (_fmt_scalar, content_key, now_iso, parse_frontmatter,
+                       safe_project_id, strip_frontmatter, title_token)
 from .engine import write_atomic
 from .audit import AuditBackend, NullAudit
 from .recall import scan_tier_dirs
@@ -40,10 +41,8 @@ _FM_RE = re.compile(r"^---\s*\n(.*?)\n---", re.S)
 
 
 def _fm_get(fm: str, key: str) -> str:
-    mm = re.search(rf"(?m)^\s*{key}:\s*(.+)$", fm)
-    if not mm:
-        return ""
-    return unquote(mm.group(1).strip())
+    """从 frontmatter 块文本读某字段值（P3：统一走 protocol.parse_frontmatter）。缺键/空值 ""。"""
+    return parse_frontmatter(f"---\n{fm}\n---").get(key, "")
 
 
 def _parse_note(md: Path) -> dict:

@@ -64,12 +64,12 @@ DUP_THRESHOLD = 0.92     # 重复阈值：相邻摘要 bigram Jaccard 高于该�
 
 
 def _read_fm(fm: str, key: str) -> str | None:
-    """从 frontmatter 读某字段标量值（剥引号+反转义 DQ），缺省 None。"""
-    from .protocol import unquote
-    mm = re.search(r"(?m)^\s*" + key + r":\s*(.+?)\s*$", fm)
-    if not mm:
-        return None
-    return unquote(mm.group(1).strip())
+    """从 frontmatter 块文本读某字段标量值（P3：统一走 protocol.parse_frontmatter）。
+
+    缺键返回 None（fm.get 缺键语义）；空值行返回 ""（调用点均以真值判断，二者一致）。
+    """
+    from .protocol import parse_frontmatter
+    return parse_frontmatter(f"---\n{fm}\n---").get(key)
 
 
 _FM_RE = re.compile(r"^---\s*\n(.*?)\n---", re.S)

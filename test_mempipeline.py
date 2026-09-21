@@ -810,12 +810,70 @@ def test_version_chain():
         assert mani3["files"][rel]["hash"] == h(out.read_bytes())
 
 
+def test_composite_audit():
+    """B2（2026-09-21 整合审查 F2）：CompositeAudit 双登记语义。
+    1) mark 全参透传两侧，返回 primary 回执；2) trace 两侧都支持则双调；
+    3) secondary 无 trace（duck 型）→ 只 primary 不 AttributeError；
+    4) secondary 异常冒泡不静默（审计完整性优先）；5) 范围过滤属 bridge 职责，
+    组合器对任意路径照常双调（不做目录感知）。"""
+    from pathlib import Path as _P
+
+    from mempipeline.audit import CompositeAudit
+
+    class _Rec:
+        def __init__(self, tag, fail=False):
+            self.tag, self.fail, self.calls = tag, fail, []
+
+        def mark(self, path, kind, source="manual", change=None, prev_hash=None):
+            if self.fail:
+                raise RuntimeError("secondary down")
+            self.calls.append(("mark", _P(path), kind, source, change, prev_hash))
+            return {"tag": self.tag, "kind": kind}
+
+        def trace(self, path, from_state, to_state, reason, source="governance"):
+            self.calls.append(("trace", _P(path), from_state, to_state, reason, source))
+            return {"tag": self.tag}
+
+    class _NoTrace:
+        def __init__(self):
+            self.calls = []
+
+        def mark(self, path, kind, source="manual", change=None, prev_hash=None):
+            self.calls.append(("mark", kind))
+
+    # 1) mark 双登记 + 参数透传 + primary 回执
+    p1, s1 = _Rec("p1"), _Rec("s1")
+    comp = CompositeAudit(p1, s1)
+    rec = comp.mark(_P("x.md"), "write", source="panel", change="收敛", prev_hash="ab" * 32)
+    assert rec == {"tag": "p1", "kind": "write"}, f"返回 primary 回执: {rec}"
+    want = ("mark", _P("x.md"), "write", "panel", "收敛", "ab" * 32)
+    assert p1.calls[0] == want and s1.calls[0] == want, f"两侧同参: {p1.calls} / {s1.calls}"
+
+    # 2) trace 双调（两侧都支持）
+    comp.trace(_P("x.md"), "draft", "promoted", "晋升", source="panel")
+    assert p1.calls[-1][0] == "trace" and s1.calls[-1][0] == "trace", "trace 双调"
+
+    # 3) secondary 无 trace → 只 primary，不 AttributeError
+    comp2 = CompositeAudit(_Rec("p2"), _NoTrace())
+    comp2.trace(_P("y.md"), "a", "b", "r")
+    comp2.mark(_P("y.md"), "skip")
+    assert len(comp2.secondary.calls) == 1 and comp2.secondary.calls[0] == ("mark", "skip")
+
+    # 4) secondary 异常冒泡（不静默——补登失败必须显形）
+    comp3 = CompositeAudit(_Rec("p3"), _Rec("s3", fail=True))
+    try:
+        comp3.mark(_P("z.md"), "write")
+        raise SystemExit("secondary 异常必须冒泡，不得静默")
+    except RuntimeError:
+        pass
+
+
 if __name__ == "__main__":
     _ok = main()
     for _fn in (test_crash_recover_sidecar, test_tfidf_recall, test_recall_golden,
                 test_project_isolation, test_tfidf_index, test_tfidf_vacuum,
                 test_g_error_visibility, test_inject_rules, test_default_synonyms,
-                test_disclosure, test_version_chain):
+                test_disclosure, test_version_chain, test_composite_audit):
         try:
             _fn()
         except AssertionError as _e:

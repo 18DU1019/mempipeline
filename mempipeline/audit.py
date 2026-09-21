@@ -158,3 +158,38 @@ class FileAudit(AuditBackend):
         """
         m = self._load()
         return list(m.get("files", {}).get(rel, {}).get("trace", []))
+
+
+class CompositeAudit(AuditBackend):
+    """组合后端：一次 mark/trace 双登记（primary 为主、secondary 为跨栈补登）。
+
+    B2（2026-09-21 整合审查 F2）：panel 晋升改写 03-记忆 只登记 prod/audit.jsonl
+    （本库 FileAudit），vault 内 05-审计/log.md 对该写入不可见。CompositeAudit 让
+    一个后端同时登记两处——primary 保持既有语义（含 prev_hash 版本链），secondary
+    做镜像补登（如运行台 audit_core 的 05-审计链）。约定：
+    - mark 全参透传给两侧，返回 primary 的回执（调用方语义不变）；
+    - secondary 异常向上冒泡不静默（审计完整性优先；业务写已由 primary 成功登记，
+      补登失败必须显形让人工介入，而非假装登记过）；
+    - trace 只要求 primary 支持（panel/governance 的 primary 实际都是 FileAudit）；
+      secondary 无 trace 方法时跳过（ duck 型，05-审计平面口径无轨迹表时以
+      log_event 事件行替代由 bridge 自行实现）；
+    - 是否过滤登记范围（如只补登 _agent 内路径）由 secondary 自行决定，组合器不感知。
+    """
+
+    def __init__(self, primary: AuditBackend, secondary: AuditBackend):
+        self.primary = primary
+        self.secondary = secondary
+
+    def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None,
+             prev_hash: Optional[str] = None) -> dict:
+        rec = self.primary.mark(path, kind, source=source, change=change, prev_hash=prev_hash)
+        self.secondary.mark(path, kind, source=source, change=change, prev_hash=prev_hash)
+        return rec
+
+    def trace(self, path: Path, from_state: str, to_state: str,
+              reason: str, source: str = "governance") -> dict:
+        rec = self.primary.trace(path, from_state, to_state, reason, source=source)
+        sec_trace = getattr(self.secondary, "trace", None)
+        if callable(sec_trace):
+            sec_trace(path, from_state, to_state, reason, source=source)
+        return rec

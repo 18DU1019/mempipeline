@@ -517,7 +517,9 @@ def serve(mem_root: Path, audit_log: Path | None = None,
         srv.server_close()
 
 
-def main(argv=None) -> int:
+def main(argv=None, audit_bridge=None) -> int:
+    """audit_bridge（B2）：可选跨栈审计补登桥（AuditBackend duck 型）。注入后
+    FileAudit 被 CompositeAudit 包装，镜像写入事件双登记（详见 audit.CompositeAudit）。"""
     import argparse
     p = argparse.ArgumentParser(description="mempipeline 记忆面板")
     p.add_argument("--mem-root", required=True, help="记忆镜像根")
@@ -541,6 +543,11 @@ def main(argv=None) -> int:
         audit = FileAudit(Path(a.audit_log),
                           Path(a.audit_log).with_suffix(".manifest.json"),
                           Path(a.mem_root))
+        # B2（2026-09-21 整合审查 F2）：调用方可注入跨栈补登桥（如运行台 05-审计），
+        # 晋升/转移写入镜像时双登记。桥由调用方实现（库零外部依赖），组合语义见 CompositeAudit。
+        if audit_bridge is not None:
+            from .audit import CompositeAudit
+            audit = CompositeAudit(audit, audit_bridge)
     serve(Path(a.mem_root), Path(a.audit_log) if a.audit_log else None,
           idx, port=a.port, audit=audit, tfidf_index=tidx,
           access_log_db=Path(a.access_log_db) if a.access_log_db else None)

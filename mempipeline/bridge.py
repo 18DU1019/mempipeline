@@ -96,13 +96,21 @@ def export_promoted(mem_root: Path, vault_root: Path,
     """资产化导出：扫描镜像 status=promoted 笔记 → 写 vault 风格 md（分流 99-DSP记忆）。
 
     分流：project_id 存在 → 99-DSP记忆/projects/<pid>/；否则（或 domain=global）→
-    99-DSP记忆/global/。文件名 {token}-{content_key}.md 与镜像一致（幂等：同内容跳过）。
-    返回 {"exported": n, "skipped": n, "dry_run": n}。
+    99-DSP记忆/global/。文件名 {token}-{content_key}.md 与镜像一致。
+
+    存在预检的语义（检验报告第五节第 3 条误诊核实，2026-09-21）：文件名含
+    content_key（内容哈希），源内容变 = 新文件名，系统不会产生同名异内容；
+    同名文件内容与导出文本不一致的唯一途径是 vault 侧手改/外部改动。故
+    exists 预检是**保护手改**的防线（write_atomic 幂等为正文级 stable_body，
+    手改正文会被覆盖留 .bak），不可移除；这里只做全文对比把跳过显形：
+    内容一致 → skipped（幂等），不一致 → modified（保护不覆盖，计数显形，
+    与 G 项「读失败显形」同范式，消除静默混计）。
+    返回 {"exported": n, "skipped": n, "modified": n, "dry_run": n}。
     """
     from .protocol import TIER_DIR
     if tiers is None:
         tiers = TIER_DIR.values()
-    stats = {"exported": 0, "skipped": 0, "dry_run": 0}
+    stats = {"exported": 0, "skipped": 0, "modified": 0, "dry_run": 0}
     for tier in tiers:
         for d in scan_tier_dirs(mem_root, tier, projects):
             for md in d.glob("*.md"):
@@ -125,7 +133,14 @@ def export_promoted(mem_root: Path, vault_root: Path,
                     stats["dry_run"] += 1
                     continue
                 if out.exists():
-                    stats["skipped"] += 1
+                    try:
+                        same = out.read_text(encoding="utf-8") == text
+                    except Exception:
+                        same = False
+                    if same:
+                        stats["skipped"] += 1  # 幂等：同内容重复导出
+                    else:
+                        stats["modified"] += 1  # vault 侧手改/外部改动：保护不覆盖，显形
                     continue
                 st, _ = write_atomic(out, text, audit or NullAudit(),
                                      source="bridge:export")

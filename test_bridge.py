@@ -93,6 +93,18 @@ def main() -> bool:
         check(st2["exported"] == 0 and st2["skipped"] == 2,
               f"重复导出全跳过（exported={st2['exported']}, skipped={st2['skipped']}）")
 
+        # 手改保护（第五节第 3 条误诊核实快照）：vault 侧被手改 → modified 显形，不覆盖
+        v_target = sorted(p1.glob("*.md"))[0]
+        hand_edited = v_target.read_text(encoding="utf-8").replace("正文A。", "手改正文A。")
+        v_target.write_text(hand_edited, encoding="utf-8")
+        st3 = export_promoted(mem_root, vault_root)
+        check(st3.get("modified") == 1 and st3["exported"] == 0 and st3["skipped"] == 1,
+              f"手改条目 modified 显形、未手改条目幂等跳过（{st3}）")
+        check(v_target.read_text(encoding="utf-8") == hand_edited,
+              "手改内容保持原样（导出不覆盖 vault 手改）")
+        check(not list(v_target.parent.glob("*.bak")),
+              "保护分支不触发写路径，无 .bak 残留")
+
         # ---- 4. 反向：vault 风格 md 可被 ingest 解析 ----
         print("== 反向解析 ==")
         v_md = list(p1.glob("*.md"))[0]

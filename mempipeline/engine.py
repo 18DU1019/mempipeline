@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 from .protocol import stable_body
@@ -19,6 +20,31 @@ _BAK_SUFFIX = ".bak"
 
 def _bak(out: Path) -> Path:
     return out.with_name(out.name + _BAK_SUFFIX)
+
+
+_NEAR_MISS_KIND = "idempotent_near_miss"
+
+
+def _near_miss_detail(old_raw: str, new_raw: str) -> str:
+    """near-miss 机读摘要：两文本行数差 + 首处差异行（截 60 字符，不落全文）。
+
+    供 stderr 告警行与审计链 detail 字段共用；竖线/换行压平，防破坏
+    FileAudit 竖线分隔的 append-only 日志行。
+    """
+    old_ln, new_ln = old_raw.splitlines(), new_raw.splitlines()
+    delta = len(new_ln) - len(old_ln)
+    first, idx = "", 0
+    for idx in range(max(len(old_ln), len(new_ln))):
+        a = old_ln[idx] if idx < len(old_ln) else "<缺行>"
+        b = new_ln[idx] if idx < len(new_ln) else "<缺行>"
+        if a != b:
+            first = (b if idx < len(new_ln) else a).strip()[:60]
+            break
+    else:
+        # raw 不等但逐行相等：差异仅在行尾风格/尾随换行（splitlines 视角不可见）
+        first, idx = "<仅行尾风格或尾随换行差异>", 0
+    first = " ".join(first.split()).replace("|", "/") or "<空行差异>"
+    return f"lines_delta={delta:+d} first_diff=L{idx + 1}:{first}"
 
 
 def write_atomic(out: Path, text: str, audit: AuditBackend,
@@ -34,13 +60,31 @@ def write_atomic(out: Path, text: str, audit: AuditBackend,
     幂等跳过时无新增写入，不产生 sidecar；若残留 `.bak` 指向的正是当前内容，
     一并登记后清理，保持镜像无累积性侧车。
 
+    V2-3 near-miss 观测（2026-09-21 三标尺检验 N03）：raw 不等但 stable 相等
+    （差异全落在被剔除的幂等不敏感行上，如仅 certainty/updated 演进）时仍跳过
+    （默认语义不破坏、告警不阻断），另发 stderr 机读告警并登记
+    `idempotent_near_miss` 审计事件（含两文本行数差与首处差异行摘要，不落全文），
+    把「误判重复 → 静默丢内容」类失效变成可计数事件。
+
     返回 (status, wrote)。
     """
     out.parent.mkdir(parents=True, exist_ok=True)
     bak = _bak(out)
     if skip_if_same and out.exists():
         try:
-            if stable_body(out.read_text(encoding="utf-8")) == stable_body(text):
+            old_raw = out.read_text(encoding="utf-8")
+            if stable_body(old_raw) == stable_body(text):
+                if old_raw != text:
+                    # V2-3（N03）：near-miss = 差异全在被剔除行上。先登记事件再登记
+                    # skip（manifest 末态保持 skip 语义）；旧式 mark 签名后端降级为
+                    # 仅登记事件（detail 丢失，事件仍可计数）。
+                    detail = _near_miss_detail(old_raw, text)
+                    print(f"[{_NEAR_MISS_KIND}] file={out.name} {detail}",
+                          file=sys.stderr)
+                    try:
+                        audit.mark(out, _NEAR_MISS_KIND, source=source, detail=detail)
+                    except TypeError:
+                        audit.mark(out, _NEAR_MISS_KIND, source=source)
                 audit.mark(out, "skip", source=source, change=None)
                 _clear_stale_recover(out, bak, audit, source)
                 return "skipped", False

@@ -876,12 +876,68 @@ def test_composite_audit():
         pass
 
 
+def test_idempotent_near_miss():
+    """V2-3（N03，2026-09-21 三标尺检验 v2）：幂等 near-miss 可观测护栏。
+
+    raw 不等但 stable 相等（仅 certainty 行不同）→ 仍 skip（默认语义不破坏、
+    告警不阻断），但 stderr 出现机读告警行，审计链登记 idempotent_near_miss
+    事件（第 7 个竖线字段含行数差与首处差异行摘要，不落全文），skip 行照常。
+    raw 全等（真幂等）→ 无 near-miss 告警，仅 skip 行。"""
+    import io
+    from contextlib import redirect_stderr
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem_root = tmp / "mem"
+        (mem_root / "01-长期记忆").mkdir(parents=True)
+        log_path = tmp / "audit" / "log.md"
+        manifest_path = tmp / "audit" / "manifest.json"
+        audit = FileAudit(log_path, manifest_path, mem_root)
+
+        out = mem_root / TIER_DIR["long"] / "项目会话-nearmiss-deadbeef.md"
+        v1 = "---\ntitle: 近失\ncertainty: 0.8\n---\n\n正文。\n"
+        v2 = "---\ntitle: 近失\ncertainty: 0.95\n---\n\n正文。\n"
+        write_atomic(out, v1, audit)
+
+        # near-miss：仅 certainty 行不同 → stable 相等 raw 不等
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            st, wrote = write_atomic(out, v2, audit)
+        assert (st, wrote) == ("skipped", False), f"near-miss 仍幂等跳过: {st}"
+        assert out.read_text(encoding="utf-8") == v1, "skip 不改写磁盘（告警不阻断）"
+        err = buf.getvalue()
+        assert "[idempotent_near_miss]" in err, f"stderr 机读告警: {err!r}"
+        assert "lines_delta=+0" in err and "first_diff=L3:certainty: 0.95" in err, \
+            f"告警含 diff 摘要字段: {err!r}"
+
+        rows = [r for r in log_path.read_text(encoding="utf-8").splitlines()
+                if "nearmiss" in r]
+        near = [r for r in rows if "idempotent_near_miss" in r]
+        assert len(near) == 1, f"审计链 near-miss 恰一条（grep 计数口径）: {rows}"
+        assert "lines_delta=+0" in near[0] and "certainty: 0.95" in near[0], \
+            f"审计事件含 diff 摘要: {near[0]}"
+        assert rows[-1].rstrip().endswith("| - |") and " | skip | " in rows[-1], \
+            f"skip 行照常登记且为末态: {rows[-1]}"
+
+        # 真幂等（raw 全等）：重投磁盘现有版本 v1 → 无 near-miss 告警，仅 skip 行
+        n_before = len(rows)
+        buf2 = io.StringIO()
+        with redirect_stderr(buf2):
+            write_atomic(out, v1, audit)
+        assert "[idempotent_near_miss]" not in buf2.getvalue(), "raw 全等不得告警"
+        rows2 = [r for r in log_path.read_text(encoding="utf-8").splitlines()
+                 if "nearmiss" in r]
+        assert len(rows2) == n_before + 1 and " | skip | " in rows2[-1], \
+            f"真幂等只登记 skip: {rows2[-1]}"
+
+
 if __name__ == "__main__":
     _ok = main()
     for _fn in (test_crash_recover_sidecar, test_tfidf_recall, test_recall_golden,
                 test_project_isolation, test_tfidf_index, test_tfidf_vacuum,
                 test_g_error_visibility, test_inject_rules, test_default_synonyms,
-                test_disclosure, test_version_chain, test_composite_audit):
+                test_disclosure, test_version_chain, test_composite_audit,
+                test_idempotent_near_miss):
         try:
             _fn()
         except AssertionError as _e:

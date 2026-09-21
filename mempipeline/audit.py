@@ -35,7 +35,7 @@ def _now_iso() -> str:
 class AuditBackend(ABC):
     @abstractmethod
     def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None,
-             prev_hash: Optional[str] = None) -> dict:
+             prev_hash: Optional[str] = None, detail: Optional[str] = None) -> dict:
         ...
 
 
@@ -47,7 +47,7 @@ class NullAudit(AuditBackend):
     """
 
     def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None,
-             prev_hash: Optional[str] = None) -> dict:
+             prev_hash: Optional[str] = None, detail: Optional[str] = None) -> dict:
         return {}
 
     def trace(self, path: Path, from_state: str, to_state: str, reason: str,
@@ -107,7 +107,7 @@ class FileAudit(AuditBackend):
             raise
 
     def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None,
-             prev_hash: Optional[str] = None) -> dict:
+             prev_hash: Optional[str] = None, detail: Optional[str] = None) -> dict:
         rel = self._rel(path)
         rec = {"path": rel, "kind": kind, "source": source,
                "hash": sha256(path) if path.exists() else None}
@@ -117,8 +117,12 @@ class FileAudit(AuditBackend):
         # append-only，每条覆盖写一行 prev 列，按时间序即成单条记忆版本链；
         # manifest 只记最近一次 prev（历史链以 log 行为准）。无覆盖写为 None。
         pv = (prev_hash or "-")[:12]
+        # V2-3 near-miss 扩展：detail 非 None 时作为第 7 个竖线字段追加行尾
+        # （机读行格式 `| path | kind | source | hash | chg | prev | detail |`）；
+        # 其余事件行保持既有 6 字段格式逐字节不变。调用方保证 detail 单行无竖线。
+        tail = f" {detail} |\n" if detail is not None else "\n"
         with open(self.log_path, "a", encoding="utf-8") as f:
-            f.write(f"| {rel} | {kind} | {source} | {(rec['hash'] or '-')[:12]} | {chg} | {pv} |\n")
+            f.write(f"| {rel} | {kind} | {source} | {(rec['hash'] or '-')[:12]} | {chg} | {pv} |" + tail)
         m = self._load()
         prev = m.setdefault("files", {}).get(rel, {})
         m.setdefault("files", {})[rel] = {
@@ -181,8 +185,15 @@ class CompositeAudit(AuditBackend):
         self.secondary = secondary
 
     def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None,
-             prev_hash: Optional[str] = None) -> dict:
-        rec = self.primary.mark(path, kind, source=source, change=change, prev_hash=prev_hash)
+             prev_hash: Optional[str] = None, detail: Optional[str] = None) -> dict:
+        # detail 只进 primary（V2-3 near-miss 摘要属主审计链）；secondary 可能是
+        # 库外 duck 型后端（旧 mark 签名），不透传以免 TypeError。detail 为 None
+        # 时两侧均按旧签名调用，既有行为逐字节不变。
+        if detail is not None:
+            rec = self.primary.mark(path, kind, source=source, change=change,
+                                    prev_hash=prev_hash, detail=detail)
+        else:
+            rec = self.primary.mark(path, kind, source=source, change=change, prev_hash=prev_hash)
         self.secondary.mark(path, kind, source=source, change=change, prev_hash=prev_hash)
         return rec
 

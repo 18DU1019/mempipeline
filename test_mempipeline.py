@@ -994,6 +994,22 @@ def test_near_miss_zone_gating():
     d, benign, _f = _near_miss_detail(old_big, new_big)
     assert not benign and f"diffs={_NEAR_DIFF_CAP}" in d, d
 
+    # 边界补强（2026-09-21 全链路审查）：全 FM 无正文 → benign；CAP 精确边界
+    # （FM 内 63 行不触发 / 64 行独立触发——上方正文区超限场景覆盖不到 CAP
+    # 独立生效路径）；空串 vs 纯换行按无-FM 保守规则显形（行为锁定防回归）。
+    d, benign, fields = _near_miss_detail("---\ntitle: a\n---\n", "---\ntitle: b\n---\n")
+    assert benign and "class=benign" in d and fields == Counter({"title": 1}), d
+    o63 = "---\n" + "\n".join(f"f{i}: old" for i in range(1, 64)) + "\n---\n正文\n"
+    n63 = "---\n" + "\n".join(f"f{i}: new" for i in range(1, 64)) + "\n---\n正文\n"
+    d, benign, _f = _near_miss_detail(o63, n63)
+    assert benign and "diffs=63" in d and "class=benign" in d, d
+    o64 = "---\n" + "\n".join(f"f{i}: old" for i in range(64)) + "\n---\n正文\n"
+    n64 = "---\n" + "\n".join(f"f{i}: new" for i in range(64)) + "\n---\n正文\n"
+    d, benign, _f = _near_miss_detail(o64, n64)
+    assert not benign and f"diffs={_NEAR_DIFF_CAP}" in d and "class=body_diff" in d, d
+    d, benign, _f = _near_miss_detail("", "\n")
+    assert not benign and "class=body_diff" in d, d
+
     # write_atomic 集成：正文区 near-miss → stderr 立即逐条显形 + 审计链 body_diff
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)

@@ -1,6 +1,14 @@
 # -*- coding: utf-8 -*-
 """ingest.py — 投稿汇聚后端：扫描 staging 目录，用前端协议 + 引擎把裸 md 熔合进镜像。
 
+⚠ 未接生产（2026-09-21 整合审查实锤）：生产熔合唯一走运行台 staging_ingest.py →
+distill_memory._write（体系A 单写者）。勿对真实 03-记忆 直跑本 CLI——幂等口径与 A 栈
+不同（本侧 stable_body 只剔 FM 块内 updated/created 两字段；A 栈 dm._stable 剔全篇
+created_src/project_id/writer_id/certainty/last_active 等七类前缀行），混跑会对
+certainty/last_active 等字段值演进的存量条目误判为新内容 → 生成重复条目。
+接入生产（方案 B1）的前置闸门 = 先跑运行台 verify_stable_body_parity.py 口径差集
+验证并拍板口径统一方案，详见 检验报告/mempipeline蒸馏链路与收尾闭环整合审查_2026-09-21。
+
 数据无关：staging_dir / tier_dirs / 生成的落盘命名全部由调用方传入，不写死任何路径。
 on_ingest 供调用方在每条熔合后执行精确 git add 等副作用。
 层映射统一取自 protocol.TIER_DIR，避免重复定义。

@@ -20,7 +20,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Iterable
 
-from .protocol import parse_frontmatter
+from .protocol import parse_frontmatter, strip_frontmatter
 
 
 class RecallBackend(ABC):
@@ -468,6 +468,64 @@ class TFIDFIndex:
 
     def _query_terms(self, query: str) -> list[str]:
         return [self._norm.get(t, t) for t in _raw_terms(query)]
+
+
+# --- 渐进披露（P1-2，检验报告第五-2 对标项）：recall 命中 → L0 摘要卡 / L1 大纲 / L2 全文 ---
+# 对标社区「分层读取」：检索面返回裸 (path, score)，消费方按需逐层加深，
+# 避免一次性把全文灌进上下文。纯增量：不改任何既有 recall 返回形态，消费方
+# 零破坏；inject/panel 接线属 B 系列另行拍板。红act 排除语义延伸到披露层：
+# 任一层对 redacted 一律拒答（与检索/导出同源切断，P3.12/P1-5 统一排除）。
+
+def _read_note(path: str | Path) -> str | None:
+    """读笔记全文；读失败/不存在返回 None（G 项范式：计数外静默缺位）。"""
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except Exception:
+        return None
+
+
+def disclose_l0(hits: Iterable[tuple[str, float]]) -> list[dict]:
+    """L0：recall 命中 (path, score) 扩为一行摘要卡（零正文读取成本形态）。
+
+    每卡 {"path", "title", "summary", "score"}：title 缺失回落文件名 stem，
+    summary 缺失回落 title（一行可判，决定是否值得 L1/L2 深读）。redacted /
+    读失败条目剔除——命中序列原序原分透传。
+    """
+    out: list[dict] = []
+    for path, score in hits:
+        txt = _read_note(path)
+        if txt is None or is_redacted(txt):
+            continue
+        fm = parse_frontmatter(txt)
+        title = fm.get("title") or Path(path).stem
+        out.append({"path": str(path), "title": title,
+                    "summary": fm.get("summary") or title, "score": score})
+    return out
+
+
+def disclose_l1(path: str | Path) -> list[str]:
+    """L1：正文大纲（Markdown 标题行原文，#~######）。
+
+    redacted / 读失败拒答 → []；无 frontmatter 不影响大纲（正文直取）。
+    代码围栏内 `#` 行按普通标题近似收录（L1 本为低成本近似，不解析围栏）。
+    """
+    txt = _read_note(path)
+    if txt is None or is_redacted(txt):
+        return []
+    body = strip_frontmatter(txt)
+    return [ln.rstrip() for ln in body.splitlines()
+            if re.match(r"^#{1,6}\s+\S", ln)]
+
+
+def disclose_l2(path: str | Path) -> str:
+    """L2：全文正文（protocol.strip_frontmatter 剥离首个 frontmatter 块）。
+
+    redacted / 读失败拒答 → ""。
+    """
+    txt = _read_note(path)
+    if txt is None or is_redacted(txt):
+        return ""
+    return strip_frontmatter(txt)
 
 
 def _default_norm(text: str) -> str:

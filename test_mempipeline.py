@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 from mempipeline.protocol import Note, TIER_DIR
 from mempipeline.audit import FileAudit
 from mempipeline.engine import write_atomic
-from mempipeline.recall import MemoryRecall, TFIDFIndex
+from mempipeline.recall import MemoryRecall, TFIDFIndex, disclose_l0, disclose_l1, disclose_l2
 from mempipeline.ingest import ingest
 
 
@@ -508,14 +508,14 @@ def test_g_error_visibility():
         check(len(hits) == 1 and Path(hits[0][0]).name.startswith("会话-正常"),
               "坏编码条目缺席、正常候选不受影响（行为不变）")
         check(base.read_errors == 1, f"全扫读失败计数=1 (实得 {base.read_errors})")
-        hits2 = base.recall("定投 纪律", k=5)
+        base.recall("定投 纪律", k=5)  # 副作用即断言对象：read_errors 累计
         check(base.read_errors == 2, f"累计语义：第二次 recall 后=2 (实得 {base.read_errors})")
 
         idx = TFIDFIndex(tmp / "gvis.db")
         built = idx.build(mem_root)
         check(built == 1, f"索引只收正常稿 (built={built})")
         check(idx.last_read_errors == 1, f"倒排 build 读失败计数=1 (实得 {idx.last_read_errors})")
-        added = idx.build(mem_root)
+        idx.build(mem_root)  # 副作用即断言对象：last_read_errors 每轮重置
         check(idx.last_read_errors == 1, f"每轮重置：增量 build 仍=1 (实得 {idx.last_read_errors})")
         idx.close()
     print("\nG ERROR VISIBILITY (2026-09-17):", "ALL PASS" if ok else "SOME FAILED")
@@ -541,7 +541,6 @@ def test_inject_rules():
         if not cond:
             ok = False
 
-    import math as _math
     from datetime import datetime as _dt, timedelta as _td
 
     from mempipeline.inject import (ABSTAIN_REL, LAYER_IMP, RECENCY_CAP,
@@ -707,11 +706,53 @@ def test_default_synonyms():
         idx.close()
 
 
+def test_disclosure():
+    """P1-2 渐进披露三层读取：L0 摘要卡 / L1 大纲 / L2 全文 + 红act 同源拒答。
+
+    回归点：纯增量不改 recall 返回形态；披露层沿用 P1-5 统一排除语义——
+    任一层对 redacted 拒答（L0 剔除该条 / L1 [] / L2 ""），读失败缺位剔除。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        note = d / "a.md"
+        note.write_text(
+            "---\ntype: note\ntitle: 仓位调度\nsummary: 量化仓位规则\n"
+            "---\n\n## 背景\n波动加大。\n### 执行\n单笔不超 1 ATR。\n",
+            encoding="utf-8")
+        bare = d / "b.md"   # 无 title/summary/标题 → 全走回落链
+        bare.write_text("---\ntype: note\n---\n\n普通正文，无标题行。\n", encoding="utf-8")
+        red = d / "r.md"
+        red.write_text('---\ntype: note\nstatus: "redacted"\n---\n\n## 秘文\n不应披露。\n',
+                       encoding="utf-8")
+
+        # L0：命中扩卡，原序原分透传；redacted/读失败剔除；回落链 stem/title
+        cards = disclose_l0([(str(note), 0.9), (str(red), 0.8), (str(d / "缺.md"), 0.7),
+                             (str(bare), 0.6)])
+        assert [c["path"] for c in cards] == [str(note), str(bare)], \
+            f"redacted/缺档剔除、原序保留: {cards}"
+        assert cards[0]["title"] == "仓位调度" and cards[0]["summary"] == "量化仓位规则"
+        assert cards[0]["score"] == 0.9, "分数透传"
+        assert cards[1]["title"] == "b" and cards[1]["summary"] == "b", \
+            f"title/summary 双回落 stem: {cards[1]}"
+
+        # L1：frontmatter 剥离后取标题行；redacted/缺档 → []
+        assert disclose_l1(note) == ["## 背景", "### 执行"], f"大纲: {disclose_l1(note)}"
+        assert disclose_l1(bare) == [], "无标题行 → 空大纲"
+        assert disclose_l1(red) == [] and disclose_l1(d / "缺.md") == [], "redacted/缺档拒答"
+
+        # L2：全文正文（剥 FM，strip_frontmatter 吞掉块尾空行）；redacted/缺档 → ""
+        body = disclose_l2(note)
+        assert body.startswith("## 背景") and "量化仓位规则" not in body, \
+            f"L2 剥离 frontmatter: {body!r}"
+        assert disclose_l2(red) == "" and disclose_l2(d / "缺.md") == "", "redacted/缺档拒答"
+
+
 if __name__ == "__main__":
     _ok = main()
     for _fn in (test_crash_recover_sidecar, test_tfidf_recall, test_recall_golden,
                 test_project_isolation, test_tfidf_index, test_tfidf_vacuum,
-                test_g_error_visibility, test_inject_rules, test_default_synonyms):
+                test_g_error_visibility, test_inject_rules, test_default_synonyms,
+                test_disclosure):
         try:
             _fn()
         except AssertionError as _e:

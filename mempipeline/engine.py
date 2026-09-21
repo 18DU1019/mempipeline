@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import atexit
+import difflib
 import os
 import re
 import shutil
@@ -78,26 +79,38 @@ def _near_miss_detail(old_raw: str, new_raw: str) -> tuple[str, bool, Counter]:
       （无逐行差异）视为 benign。差异行收集封顶 _NEAR_DIFF_CAP，超限保守判
       body_diff（显形无害，静音才危险）。
     - fields：全部差异行的字段名计数（良性事件按字段汇总用）。
+
+    对齐算法（2026-09-21 首跑教训）：初版逐行 idx 配对，FM 模板字段演进使行数差
+    ±1/-2 时错位点之后全部行错配判差（首跑 benign=3/body_diff=171，真实差异全在
+    FM 内却几乎全判 body_diff 糊墙）——改 difflib.SequenceMatcher 对齐，只把真实
+    replace/insert/delete 块的行算差异行。autojunk 关闭防 "---" 等高频行被当
+    junk 产生错误对齐。
     """
     old_ln, new_ln = old_raw.splitlines(), new_raw.splitlines()
     delta = len(new_ln) - len(old_ln)
     fm_end_old, fm_end_new = _fm_end_index(old_ln), _fm_end_index(new_ln)
     diff_rows: list[tuple[int, str]] = []  # (行号 0-based, 展示文本)
     body_diff = False
-    for idx in range(max(len(old_ln), len(new_ln))):
-        a = old_ln[idx] if idx < len(old_ln) else "<缺行>"
-        b = new_ln[idx] if idx < len(new_ln) else "<缺行>"
-        if a == b:
+    sm = difflib.SequenceMatcher(a=old_ln, b=new_ln, autojunk=False)
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
             continue
-        shown = (b if idx < len(new_ln) else a).strip()[:60]
-        diff_rows.append((idx, shown))
-        # 位置判定：行存在侧任一落在正文区（FM 块结束后）即 body_diff；
-        # 缺行侧天然不判（另一侧存在分支已覆盖），双侧异常形态保守显形。
-        if (idx < len(old_ln) and idx > fm_end_old) or \
-           (idx < len(new_ln) and idx > fm_end_new):
-            body_diff = True
+        # 真实差异块：replace 两侧逐位配对，insert 只有新侧，delete 只有旧侧
+        for k in range(max(i2 - i1, j2 - j1)):
+            new_row = new_ln[j1 + k] if j1 + k < j2 else "<缺行>"
+            old_row = old_ln[i1 + k] if i1 + k < i2 else "<缺行>"
+            shown = (new_row if new_row != "<缺行>" else old_row).strip()[:60]
+            idx = j1 + k if j1 + k < j2 else i1 + k
+            diff_rows.append((idx, shown))
+            # 位置判定：行存在侧任一落在正文区（FM 块结束后）即 body_diff；
+            # 缺行侧天然不判（存在侧分支已覆盖），双侧异常形态保守显形。
+            if (i1 + k < i2 and i1 + k > fm_end_old) or \
+               (j1 + k < j2 and j1 + k > fm_end_new):
+                body_diff = True
+            if len(diff_rows) >= _NEAR_DIFF_CAP:
+                body_diff = True  # 差异面超分类预算：保守显形
+                break
         if len(diff_rows) >= _NEAR_DIFF_CAP:
-            body_diff = True  # 差异面超分类预算：保守显形
             break
     fields: Counter = Counter()
     for _idx, shown in diff_rows:

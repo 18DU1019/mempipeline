@@ -974,6 +974,20 @@ def test_near_miss_zone_gating():
         "---\ntitle: t\ncertainty: 0.9\n---\n正文\nwriter_id: x\n")
     assert not benign and fields == Counter({"certainty": 1, "writer_id": 1}), d
 
+    # FM 中部行数变化（模板字段演进，2026-09-21 首跑教训回归）：正文全同 → benign。
+    # 初版逐行 idx 配对在错位点后全文错配，伪 body_diff 糊墙 171 条；SequenceMatcher
+    # 对齐后差异行全部落在 FM 块内。
+    old_fm_shift = ("---\ntitle: t\nsummary: s\ntype: note\nwriter_id: a\n"
+                    "created_src: backfill\ncertainty: inferred\nupdated: 2026-09-20\n---\n正文\n")
+    new_fm_shift = ("---\ntitle: t\nsummary: s\ntype: note\nwriter_id: a\n"
+                    "certainty: verified\nupdated: 2026-09-21\n---\n正文\n")
+    d, benign, fields = _near_miss_detail(old_fm_shift, new_fm_shift)
+    assert benign and "class=benign" in d, d
+    assert set(fields) <= {"certainty", "updated", "created_src"}, d
+    # 反向（新模板多一行）同样 benign
+    d, benign, _f = _near_miss_detail(new_fm_shift, old_fm_shift)
+    assert benign and "class=benign" in d, d
+
     # 差异行超分类预算 → 保守显形
     old_big = "---\ntitle: t\n---\n" + "\n".join(f"行{i}" for i in range(100)) + "\n"
     new_big = "---\ntitle: t\n---\n" + "\n".join(f"变{i}" for i in range(100)) + "\n"

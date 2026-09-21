@@ -877,12 +877,13 @@ def test_composite_audit():
 
 
 def test_idempotent_near_miss():
-    """V2-3（N03，2026-09-21 三标尺检验 v2）：幂等 near-miss 可观测护栏。
+    """V2-3（N03）+ 位置感知分流（2026-09-21 拍板合题）：幂等 near-miss 可观测护栏。
 
-    raw 不等但 stable 相等（仅 certainty 行不同）→ 仍 skip（默认语义不破坏、
-    告警不阻断），但 stderr 出现机读告警行，审计链登记 idempotent_near_miss
-    事件（第 7 个竖线字段含行数差与首处差异行摘要，不落全文），skip 行照常。
-    raw 全等（真幂等）→ 无 near-miss 告警，仅 skip 行。"""
+    raw 不等但 stable 相等（仅 FM 块内 certainty 行不同，差异行全在 FM 块内）→
+    仍 skip（默认语义不破坏、告警不阻断）；良性事件 stderr 不再逐条打印（防糊
+    墙，实测单轮 175 条全良性），按字段计入进程级统计；审计链登记
+    idempotent_near_miss 事件（detail 含 class=benign 段，可 grep 对账），skip 行
+    照常。raw 全等（真幂等）→ 无 near-miss 事件，仅 skip 行。"""
     import io
     from contextlib import redirect_stderr
 
@@ -899,16 +900,15 @@ def test_idempotent_near_miss():
         v2 = "---\ntitle: 近失\ncertainty: 0.95\n---\n\n正文。\n"
         write_atomic(out, v1, audit)
 
-        # near-miss：仅 certainty 行不同 → stable 相等 raw 不等
+        # near-miss：仅 certainty 行不同（FM 块内）→ stable 相等 raw 不等 → 良性
         buf = io.StringIO()
         with redirect_stderr(buf):
             st, wrote = write_atomic(out, v2, audit)
         assert (st, wrote) == ("skipped", False), f"near-miss 仍幂等跳过: {st}"
         assert out.read_text(encoding="utf-8") == v1, "skip 不改写磁盘（告警不阻断）"
         err = buf.getvalue()
-        assert "[idempotent_near_miss]" in err, f"stderr 机读告警: {err!r}"
-        assert "lines_delta=+0" in err and "first_diff=L3:certainty: 0.95" in err, \
-            f"告警含 diff 摘要字段: {err!r}"
+        assert "[idempotent_near_miss]" not in err, \
+            f"良性事件 stderr 不得逐条打印（防糊墙，折进程汇总）: {err!r}"
 
         rows = [r for r in log_path.read_text(encoding="utf-8").splitlines()
                 if "nearmiss" in r]
@@ -916,10 +916,12 @@ def test_idempotent_near_miss():
         assert len(near) == 1, f"审计链 near-miss 恰一条（grep 计数口径）: {rows}"
         assert "lines_delta=+0" in near[0] and "certainty: 0.95" in near[0], \
             f"审计事件含 diff 摘要: {near[0]}"
+        assert "class=benign" in near[0] and "diffs=1" in near[0], \
+            f"审计事件带分流类别段: {near[0]}"
         assert rows[-1].rstrip().endswith("| - |") and " | skip | " in rows[-1], \
             f"skip 行照常登记且为末态: {rows[-1]}"
 
-        # 真幂等（raw 全等）：重投磁盘现有版本 v1 → 无 near-miss 告警，仅 skip 行
+        # 真幂等（raw 全等）：重投磁盘现有版本 v1 → 无 near-miss 事件，仅 skip 行
         n_before = len(rows)
         buf2 = io.StringIO()
         with redirect_stderr(buf2):
@@ -931,13 +933,96 @@ def test_idempotent_near_miss():
             f"真幂等只登记 skip: {rows2[-1]}"
 
 
+def test_near_miss_zone_gating():
+    """位置感知分流（2026-09-21 拍板合题）：N03 威胁形态必须显形。
+
+    _near_miss_detail 单元断言（FM 内良性 / 正文区显形 / 无 FM 保守 / 仅行尾
+    差异良性 / 混合差异显形）+ write_atomic 集成：正文里新增剔除前缀行
+    （dm._stable 全篇 startswith 吞正文同名行）→ near-miss 且差异行在正文区 →
+    class=body_diff，stderr 立即逐条显形；进程汇总函数输出 benign 计数。"""
+    import io
+    from collections import Counter
+    from contextlib import redirect_stderr
+
+    from mempipeline.engine import (_NEAR_DIFF_CAP, _near_miss_detail,
+                                    _report_near_miss_stats)
+
+    # FM 块内字段演进 → benign
+    d, benign, fields = _near_miss_detail(
+        "---\ntitle: t\nupdated: 2026-01-01\n---\n正文\n",
+        "---\ntitle: t\nupdated: 2026-09-21\n---\n正文\n")
+    assert benign and "class=benign" in d and fields == Counter({"updated": 1}), d
+
+    # 威胁形态：正文新增剔除前缀行（正文同名行被吞 → 静默丢内容）→ body_diff
+    d, benign, fields = _near_miss_detail(
+        "---\ntitle: t\n---\n\n正文。\n",
+        "---\ntitle: t\n---\n\n正文。\nupdated: 2026-01-01\n")
+    assert not benign and "class=body_diff" in d and fields == Counter({"updated": 1}), d
+    assert "first_diff=L6:updated: 2026-01-01" in d, d
+
+    # 无 frontmatter 块 → 差异行按正文保守显形
+    d, benign, _f = _near_miss_detail("普通文本\n", "普通文本\ncertainty: 1\n")
+    assert not benign and "class=body_diff" in d, d
+
+    # 仅行尾风格/尾随换行差异（无逐行差异）→ benign
+    d, benign, fields = _near_miss_detail("a\nb\n", "a\nb")
+    assert benign and "仅行尾风格" in d and not fields, d
+
+    # 混合差异（FM 内 1 行 + 正文区 1 行）→ 任一正文即显形
+    d, benign, fields = _near_miss_detail(
+        "---\ntitle: t\ncertainty: 0.8\n---\n正文\n",
+        "---\ntitle: t\ncertainty: 0.9\n---\n正文\nwriter_id: x\n")
+    assert not benign and fields == Counter({"certainty": 1, "writer_id": 1}), d
+
+    # 差异行超分类预算 → 保守显形
+    old_big = "---\ntitle: t\n---\n" + "\n".join(f"行{i}" for i in range(100)) + "\n"
+    new_big = "---\ntitle: t\n---\n" + "\n".join(f"变{i}" for i in range(100)) + "\n"
+    d, benign, _f = _near_miss_detail(old_big, new_big)
+    assert not benign and f"diffs={_NEAR_DIFF_CAP}" in d, d
+
+    # write_atomic 集成：正文区 near-miss → stderr 立即逐条显形 + 审计链 body_diff
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem_root = tmp / "mem"
+        (mem_root / "01-长期记忆").mkdir(parents=True)
+        log_path = tmp / "audit" / "log.md"
+        manifest_path = tmp / "audit" / "manifest.json"
+        audit = FileAudit(log_path, manifest_path, mem_root)
+        out = mem_root / TIER_DIR["long"] / "项目会话-zoning-deadbeef.md"
+        v1 = "---\ntitle: 区分\n---\n\n正文。\n"
+        v2 = "---\ntitle: 区分\n---\n\n正文。\nupdated: 2026-01-01\n"
+        write_atomic(out, v1, audit)
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            st, _w = write_atomic(out, v2, audit)
+        assert st == "skipped", f"正文区 near-miss 仍幂等跳过: {st}"
+        assert "[idempotent_near_miss]" in buf.getvalue() and "class=body_diff" in buf.getvalue(), \
+            f"正文区差异必须 stderr 逐条显形: {buf.getvalue()!r}"
+        rows = [r for r in log_path.read_text(encoding="utf-8").splitlines()
+                if "zoning" in r and "idempotent_near_miss" in r]
+        assert len(rows) == 1 and "class=body_diff" in rows[0], rows
+
+    # 进程汇总函数：真实累计态下输出一行（相对值断言，不依赖测试运行顺序）
+    import mempipeline.engine as _eng
+    pre_benign = sum(_eng._near_miss_benign.values())
+    pre_body = _eng._near_miss_body
+    _eng._near_miss_benign.update({"certainty": 2, "updated": 1})
+    _eng._near_miss_body += 1
+    buf3 = io.StringIO()
+    with redirect_stderr(buf3):
+        _report_near_miss_stats()
+    summary = buf3.getvalue()
+    assert f"benign={pre_benign + 3}" in summary and "certainty:" in summary, summary
+    assert f"body_diff={pre_body + 1}" in summary, summary
+
+
 if __name__ == "__main__":
     _ok = main()
     for _fn in (test_crash_recover_sidecar, test_tfidf_recall, test_recall_golden,
                 test_project_isolation, test_tfidf_index, test_tfidf_vacuum,
                 test_g_error_visibility, test_inject_rules, test_default_synonyms,
                 test_disclosure, test_version_chain, test_composite_audit,
-                test_idempotent_near_miss):
+                test_idempotent_near_miss, test_near_miss_zone_gating):
         try:
             _fn()
         except AssertionError as _e:

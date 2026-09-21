@@ -6,9 +6,12 @@
 """
 from __future__ import annotations
 
+import atexit
 import os
+import re
 import shutil
 import sys
+from collections import Counter
 from pathlib import Path
 
 from .protocol import stable_body
@@ -24,27 +27,91 @@ def _bak(out: Path) -> Path:
 
 _NEAR_MISS_KIND = "idempotent_near_miss"
 
+# 位置感知分流（2026-09-21 拍板合题）：良性演进按字段计入进程级统计，退出时
+# 一行汇总（防糊墙——实测单轮 175 条全良性）；正文区差异即时逐条显形不走此计数。
+_near_miss_benign: Counter = Counter()
+_near_miss_body = 0
+_NEAR_DIFF_CAP = 64  # 差异行收集上限：仅用于位置分类，超限保守判 body_diff
 
-def _near_miss_detail(old_raw: str, new_raw: str) -> str:
-    """near-miss 机读摘要：两文本行数差 + 首处差异行（截 60 字符，不落全文）。
 
-    供 stderr 告警行与审计链 detail 字段共用；竖线/换行压平，防破坏
-    FileAudit 竖线分隔的 append-only 日志行。
+def _near_miss_field(line: str) -> str:
+    """差异行 → 字段名（良性事件按字段计数用）；非字段形态归 other。"""
+    m = re.match(r"([A-Za-z_][A-Za-z0-9_-]*):", line.strip())
+    return m.group(1) if m else "other"
+
+
+def _fm_end_index(lines: list[str]) -> int:
+    """首个 frontmatter 块的结束行号（0-based，即第二个 --- 所在行）；无块返 -1。"""
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                return i
+    return -1
+
+
+def _report_near_miss_stats() -> None:
+    """进程退出汇总：良性事件一行统计；正文差异已逐条显形，此处仅计数复核。"""
+    total = sum(_near_miss_benign.values())
+    if not total and not _near_miss_body:
+        return
+    fields = " ".join(f"{k}:{v}" for k, v in _near_miss_benign.most_common()) or "-"
+    print(f"[{_NEAR_MISS_KIND}] 进程汇总: benign={total}({fields}) "
+          f"body_diff={_near_miss_body}(正文区差异已逐条显形)；"
+          f"逐条见审计链 class 段", file=sys.stderr)
+
+
+atexit.register(_report_near_miss_stats)
+
+
+def _near_miss_detail(old_raw: str, new_raw: str) -> tuple[str, bool, Counter]:
+    """near-miss 机读摘要 + 位置感知分流判定（2026-09-21 拍板合题）。
+
+    返回 (detail, benign, fields)：
+    - detail：行数差 + 首处差异行（截 60 字符，不落全文）+ 差异行数 + 分流类别，
+      供 stderr 告警行与审计链 detail 字段共用；竖线/换行压平，防破坏
+      FileAudit 竖线分隔的 append-only 日志行。
+    - benign：位置感知分流判定。stable 相等只保证差异行全部命中剔除前缀，但
+      剔除是全篇 startswith（正文同名行同剔）——正文里以剔除前缀开头的行
+      （如正文引用示例）被吞属 N03 威胁形态「静默丢内容」。故全部差异行均落
+      在首个 frontmatter 块内 → 设计意图内演进（benign=True）；任一差异行在
+      正文区 → benign=False，stderr 必须逐条显形。仅行尾风格/尾随换行差异
+      （无逐行差异）视为 benign。差异行收集封顶 _NEAR_DIFF_CAP，超限保守判
+      body_diff（显形无害，静音才危险）。
+    - fields：全部差异行的字段名计数（良性事件按字段汇总用）。
     """
     old_ln, new_ln = old_raw.splitlines(), new_raw.splitlines()
     delta = len(new_ln) - len(old_ln)
-    first, idx = "", 0
+    fm_end_old, fm_end_new = _fm_end_index(old_ln), _fm_end_index(new_ln)
+    diff_rows: list[tuple[int, str]] = []  # (行号 0-based, 展示文本)
+    body_diff = False
     for idx in range(max(len(old_ln), len(new_ln))):
         a = old_ln[idx] if idx < len(old_ln) else "<缺行>"
         b = new_ln[idx] if idx < len(new_ln) else "<缺行>"
-        if a != b:
-            first = (b if idx < len(new_ln) else a).strip()[:60]
+        if a == b:
+            continue
+        shown = (b if idx < len(new_ln) else a).strip()[:60]
+        diff_rows.append((idx, shown))
+        # 位置判定：行存在侧任一落在正文区（FM 块结束后）即 body_diff；
+        # 缺行侧天然不判（另一侧存在分支已覆盖），双侧异常形态保守显形。
+        if (idx < len(old_ln) and idx > fm_end_old) or \
+           (idx < len(new_ln) and idx > fm_end_new):
+            body_diff = True
+        if len(diff_rows) >= _NEAR_DIFF_CAP:
+            body_diff = True  # 差异面超分类预算：保守显形
             break
+    fields: Counter = Counter()
+    for _idx, shown in diff_rows:
+        fields[_near_miss_field(shown)] += 1
+    if diff_rows:
+        first_idx, first = diff_rows[0]
+        first = " ".join(first.split()).replace("|", "/") or "<空行差异>"
     else:
         # raw 不等但逐行相等：差异仅在行尾风格/尾随换行（splitlines 视角不可见）
-        first, idx = "<仅行尾风格或尾随换行差异>", 0
-    first = " ".join(first.split()).replace("|", "/") or "<空行差异>"
-    return f"lines_delta={delta:+d} first_diff=L{idx + 1}:{first}"
+        first_idx, first = 0, "<仅行尾风格或尾随换行差异>"
+    cls = "body_diff" if body_diff else "benign"
+    detail = (f"lines_delta={delta:+d} first_diff=L{first_idx + 1}:{first} "
+              f"diffs={len(diff_rows)} class={cls}")
+    return detail, not body_diff, fields
 
 
 def write_atomic(out: Path, text: str, audit: AuditBackend,
@@ -68,6 +135,7 @@ def write_atomic(out: Path, text: str, audit: AuditBackend,
 
     返回 (status, wrote)。
     """
+    global _near_miss_body  # augassign 模块级计数器；漏声明会被 skip 块 except 吞成落写路径
     out.parent.mkdir(parents=True, exist_ok=True)
     bak = _bak(out)
     if skip_if_same and out.exists():
@@ -75,12 +143,20 @@ def write_atomic(out: Path, text: str, audit: AuditBackend,
             old_raw = out.read_text(encoding="utf-8")
             if stable_body(old_raw) == stable_body(text):
                 if old_raw != text:
-                    # V2-3（N03）：near-miss = 差异全在被剔除行上。先登记事件再登记
-                    # skip（manifest 末态保持 skip 语义）；旧式 mark 签名后端降级为
-                    # 仅登记事件（detail 丢失，事件仍可计数）。
-                    detail = _near_miss_detail(old_raw, text)
-                    print(f"[{_NEAR_MISS_KIND}] file={out.name} {detail}",
-                          file=sys.stderr)
+                    # V2-3（N03）+ 位置感知分流（2026-09-21 拍板合题）：near-miss =
+                    # 差异全在被剔除行上。按差异行位置分流 stderr 人读面：良性演进
+                    # （差异行全在 FM 块内）不再逐条打印（实测单轮 175 条全良性已
+                    # 糊墙），按字段计数入进程级统计、退出时一行汇总；正文区差异
+                    # （N03 要抓的「正文同名行被吞」形态）立即逐条显形。审计链事件
+                    # 保持逐条不变（detail 带 class 段可 grep 对账）；旧式 mark 签名
+                    # 后端降级为仅登记事件（detail 丢失，事件仍可计数）。
+                    detail, benign, fields = _near_miss_detail(old_raw, text)
+                    if benign:
+                        _near_miss_benign.update(fields)
+                    else:
+                        _near_miss_body += 1
+                        print(f"[{_NEAR_MISS_KIND}] file={out.name} {detail}",
+                              file=sys.stderr)
                     try:
                         audit.mark(out, _NEAR_MISS_KIND, source=source, detail=detail)
                     except TypeError:

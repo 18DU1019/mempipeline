@@ -34,6 +34,24 @@ done
 if [ "$rl_fail" = "1" ]; then
   exit 1
 fi
+# ---- B1 幂等口径 parity 闸门（2026-09-21 常驻）----
+# mempipeline.parity 由开发者本地 git config 指路 verify_stable_body_parity.py
+# （不入库：个人路径不得进版本库，同 mempipeline.python 惯例）。
+# 未配置（clone 侧/其他开发者）→ SKIP，不影响开源协作（fail-open）；
+# 配置了但 FAIL → 拒推（fail-closed）：stable_body 口径漂移 = 切线后重复条目事故。
+# 放在密钥扫描之前：口径验证与是否有新提交无关，任何 push 动作都验证。
+PARITY="$(git config --get mempipeline.parity || true)"
+if [ -n "$PARITY" ] && [ -f "$PARITY" ]; then
+  echo "=== [pre-push] B1 口径 parity 全库验证 ==="
+  if ! "$PY" "$PARITY"; then
+    echo "❌ [pre-push] parity FAIL：A/B 栈幂等口径漂移，推送已拦截。"
+    echo "    修复 protocol.stable_body 口径并重跑验证脚本全绿后重推。"
+    exit 1
+  fi
+else
+  echo "=== [pre-push] mempipeline.parity 未配置，跳过口径验证（fail-open）==="
+fi
+
 # 去重；全空则无事可扫
 all_commits=$(echo $all_commits | tr ' ' '\n' | sort -u | tr '\n' ' ')
 if [ -z "$(echo $all_commits | tr -d ' ')" ]; then

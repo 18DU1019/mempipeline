@@ -222,25 +222,40 @@ class Note:
         return "\n".join(lines)
 
 
-def stable_body(text: str) -> str:
-    """剔除「首个 frontmatter 块」内的时间戳行（updated: 与 created:）。
+# B1 口径统一（2026-09-21 拍板，mempipeline幂等口径统一方案_2026-09-21）：
+# 与运行台 dm._stable 同构的剔除集。镜像 294 篇文件名 key 全部绑定 A 口径
+# （全篇剔 7 类前缀行），故 B 栈默认剔除集即镜像兼容口径；通用调用方可用
+# stable_body(strip=...) 覆盖。dm._stable 冻结红线（勿改换行处理）同语义
+# 约束本函数：改动须先跑 verify_stable_body_parity.py 保持全库 key 不变。
+STRIP_PREFIXES = (
+    "updated:", "created:", "created_src:", "project_id:",
+    "writer_id:", "certainty:", "last_active:",
+)
 
-    两个字段都不参与 content_key，理由分别是：
-    - updated 是实时字段，每次重写都会变，参入会让幂等失效；
-    - created 是后加字段，存量笔记没有它（2026-09-11 实测 0/225）。若参入 key，
-      存量笔记首次带 created 重写时 key 会变化，被判为新笔记而重复写入。
-      剔除后新旧口径一致，P3-0 的字段补齐不会触发存量重复。
-    只处理首个 --- 块，绝不触碰正文中以同名字段开头的普通段落。无 frontmatter 则原样返回。
+
+def stable_body(text: str, strip: tuple = STRIP_PREFIXES) -> str:
+    """剔除幂等不敏感的 frontmatter 字段行，返回稳定正文（B1 口径统一版）。
+
+    原实现只剔「首个 frontmatter 块内」的 updated/created 两字段，与运行台
+    dm._stable（全篇剔 7 类前缀行）口径不一致——staging 熔合切本库引擎
+    （B1）时，凡携带 writer_id/certainty/last_active 等差异字段的条目会被
+    误判为新内容 → 新 content_key → 重复条目（2026-09-21 实测 294/294 篇
+    命中差异字段）。现改为与 dm._stable 逐字节同构：全篇 splitlines →
+    过滤前缀行 → join("\n")；startswith 接受元组与逐字段 and 链语义等价，
+    输出由构造保证一致，verify_stable_body_parity.py 以全库字节级断言兜底
+    （B1 切线硬前置 + pre-push 常驻）。
+
+    strip 参数为剔除前缀元组，默认 STRIP_PREFIXES（镜像兼容口径）；通用
+    场景（非记忆管线 frontmatter）可传 () 关闭剔除或自定义剔除集。
+
+    正文同名行（如正文首列恰为 `created:` 开头的普通文本）同样被剔——与
+    dm._stable 冻结语义一致，2026-09-21 实测全库 0 篇正文命中，失效模式
+    偏安全侧（漏判重复，绝不误判新内容）。
     """
-    m = re.match(r"^---\s*\n.*?\n---\s*\n?", text, re.S)
-    if not m:
-        return text
-    fm = m.group(0)
-    stripped = "\n".join(
-        ln for ln in fm.splitlines()
-        if not re.match(r"^\s*(?:updated|created)\s*:", ln)
+    return "\n".join(
+        ln for ln in text.splitlines()
+        if not ln.startswith(strip)
     )
-    return stripped + text[m.end():]
 
 
 def strip_frontmatter(text: str) -> str:
@@ -252,7 +267,20 @@ def strip_frontmatter(text: str) -> str:
 
 
 def content_key(text: str) -> str:
-    return hashlib.sha256(stable_body(text).encode("utf-8")).hexdigest()[:12]
+    """内容幂等 key：sha256(stable_body(text))[:8]，与 A 栈 staging_ingest 对齐。
+
+    截断 8 位为 B1 拍板口径（2026-09-21）：镜像文件名 key 唯一内容类来源是
+    staging_ingest._content_key 的 [:8]（`项目会话-{标题}-{key}.md` 模板）；
+    另一 6 位 hex 尾缀是 distill_memory._project_token 的 project_id（TRAE
+    项目主码后 6 位，项目身份短 id），与内容 key 无关，勿混淆。
+
+    三层地址契约（V2-1，2026-09-21 三标尺检验 N01 收敛）：蒸馏主链文件名不含
+    key（幂等靠同名覆盖路径 + dm._stable skip 比较语义）；staging 与本函数统一
+    8 位，唯一 hash 输入 = stable_body（与 dm._stable 逐字节同构）。存量向后
+    兼容硬红线：[:8] 对 119 篇 keyed 存量逐字节复现（verify_stable_body_parity.py
+    断言② + PARITY_JSON 机读），12 位旧输出无任何存量依赖，migration 只增不改。
+    """
+    return hashlib.sha256(stable_body(text).encode("utf-8")).hexdigest()[:8]
 
 
 _SAFE_PROJECT_RE = re.compile(r"^[\w.-]+$")

@@ -218,6 +218,29 @@ def test_submit_dq_roundtrip() -> None:
         raise AssertionError("test_submit_dq_roundtrip: 子断言失败")
 
 
+def test_read_frontmatter_no_swallow() -> None:
+    r"""P1-5 收编锁定：_read_frontmatter 走 parse_frontmatter，空值行不吞下一行。
+
+    回归点：原私有解析器逐键 `\s*(.+)$` 捕值，`project_id:`（空值）后
+    `\s*` 贪婪吃掉换行，`(.+)$` 把下一行整行吞成 project_id 的值
+    （writer_contracts 历史 bug 同款缺陷，方案第六节清单遗漏的第七处）。
+    """
+    from mempipeline.panel import _read_frontmatter
+
+    with tempfile.TemporaryDirectory() as td:
+        md = Path(td) / "n.md"
+        md.write_text("---\ntitle: t\nproject_id: \nkind: lesson\n---\n正文\n",
+                      encoding="utf-8")
+        fm = _read_frontmatter(md)
+        assert fm.get("project_id") == "", f"空值键应为 ''，实得 {fm.get('project_id')!r}"
+        assert fm.get("kind") == "lesson", f"下一行须独立成键，实得 {fm.get('kind')!r}"
+        # 无 frontmatter / 读失败 → {}（原语义保留）
+        empty = Path(td) / "e.md"
+        empty.write_text("纯正文\n", encoding="utf-8")
+        assert _read_frontmatter(empty) == {}
+    print("READ_FM_NO_SWALLOW (P1-5): ALL PASS")
+
+
 def test_null_audit_transition() -> None:
     """_NullAudit 无审计后端时面板晋升不崩溃（trace 由系统自动登记）。"""
     ok = True
@@ -324,7 +347,8 @@ if __name__ == "__main__":
     panel_ok = main()
     for _name, _fn in (("SUBMI-DQ", test_submit_dq_roundtrip),
                        ("NULL_AUDIT", test_null_audit_transition),
-                       ("ACT+EXPO", test_activity_exposure)):
+                       ("ACT+EXPO", test_activity_exposure),
+                       ("FM-NOSWAL", test_read_frontmatter_no_swallow)):
         try:
             _fn()
         except AssertionError as _e:

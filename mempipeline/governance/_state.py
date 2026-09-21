@@ -192,8 +192,13 @@ def redact(note_path: Path, audit: AuditBackend, *, wipe: bool = False,
 
 def review_queue(mem_root: Path, tiers: Iterable[str] | None = None,
                  projects: Iterable[str] | None = None) -> list[Path]:
-    """扫描 candidate 状态笔记，返回待人工审核清单（升序）。"""
-    from ..protocol import TIER_DIR
+    """扫描 candidate 状态笔记，返回待人工审核清单（升序）。
+
+    P1-5：status 判读收编走 protocol.parse_frontmatter（P5 只收了 transition，
+    本处 strip('"\'') 不反转义分叉为漏网点；candidate 值无特殊字符行为等价，
+    实现路径归一）。
+    """
+    from ..protocol import TIER_DIR, parse_frontmatter
     if tiers is None:
         tiers = TIER_DIR.values()
     out: list[Path] = []
@@ -204,12 +209,9 @@ def review_queue(mem_root: Path, tiers: Iterable[str] | None = None,
                     txt = md.read_text(encoding="utf-8")
                 except Exception:
                     continue
-                m = _FM_RE.match(txt)
-                if not m:
+                if parse_frontmatter(txt).get("status") != "candidate":
                     continue
-                mm = re.search(r"(?m)^\s*status:\s*(.+)$", m.group(1))
-                if mm and mm.group(1).strip().strip('"\'') == "candidate":
-                    out.append(md)
+                out.append(md)
     return sorted(out)
 
 

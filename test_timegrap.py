@@ -278,6 +278,13 @@ def main() -> bool:
     check(_jaccard(_bigrams("出餐口到餐桌要短"), _bigrams("出餐口到餐桌要短")) == 1.0
           and _jaccard(_bigrams("abc"), _bigrams("def")) == 0.0,
           "recall._bigrams/_jaccard 为 timegrap/crossref 共享源")
+    # ---- (bonus) P1-5 收编锁定：_status_of 走 protocol 解析器（检索面排除同源）----
+    from mempipeline.timegrap import _status_of
+    check(_status_of('title: "t"\nstatus: "redacted"\n') == "redacted",
+          "_status_of 引号形态反转义一致（走 parse_frontmatter）")
+    check(_status_of("title: t\n") == "active", "_status_of 缺键回落 active")
+    check(_status_of("status: \nnext: v\n") == "",
+          "_status_of 空值行不吞下一行（原 \\s*(.+)$ 吞值缺陷已修）")
 
     print("\nTIMEGRAP (P2):", "ALL PASS" if ok else "SOME FAILED")
     return ok

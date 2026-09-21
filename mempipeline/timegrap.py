@@ -273,11 +273,13 @@ def _importance_of(fm: str) -> float:
 
 
 def _status_of(fm: str) -> str:
-    from .protocol import unquote
-    m = re.search(r"(?m)^\s*status:\s*(.+)$", fm)
-    if not m:
-        return "active"
-    return unquote(m.group(1).strip())
+    r"""读 status 键（P1-5：收编走 protocol 解析器，与检索面排除判定同源）。
+
+    缺键回落 "active"（时间图谱展示语义，与 transition 的 draft 回落不同源）。
+    原单键正则 `\s*(.+)$` 空值行会吞下一行，parse_frontmatter 行锚定顺带修复。
+    """
+    from .protocol import parse_frontmatter
+    return parse_frontmatter(f"---\n{fm}\n---").get("status", "active")
 
 
 def _project_of(fm: str) -> str | None:

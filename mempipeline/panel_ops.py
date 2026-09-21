@@ -10,37 +10,34 @@ _submit_note/_read_frontmatter）。
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Iterable
 
 from .audit import NullAudit
 from .governance import review_queue
+from .protocol import parse_frontmatter_blocks
 
 
 def _read_frontmatter(md: Path) -> dict:
-    _FM = re.compile(r"^---\s*\n(.*?)\n---", re.S)
+    r"""读九键白名单 frontmatter（P1-5：收编走 protocol 解析器，消除私有解析器）。
+
+    缺键值 ""（原语义）；读失败/无 frontmatter 块 → {}（blocks 空判定，
+    区分「无块」与「有块但无有效键」两形态，后者仍得九键全 ""）。原私有
+    实现逐键 `\s*(.+)$` 捕值，空值行会跨行吞掉下一行（writer_contracts
+    历史 bug 同款缺陷，方案第六节六处清单亦遗漏本处）；parse_frontmatter
+    行锚定捕获顺带修复，空值正确回落 ""。
+    """
     try:
         txt = md.read_text(encoding="utf-8")
     except Exception:
         return {}
-    m = _FM.match(txt)
-    if not m:
+    blocks = parse_frontmatter_blocks(txt)
+    if not blocks:
         return {}
-    fm = m.group(1)
-    out = {}
-
-    def get(k):
-        from .protocol import unquote
-        mm = re.search(rf"(?m)^\s*{k}:\s*(.+)$", fm)
-        if not mm:
-            return ""
-        return unquote(mm.group(1).strip())
-
-    for k in ("title", "memory_tier", "status", "project_id", "domain", "kind",
-              "source_agent", "updated", "importance"):
-        out[k] = get(k)
-    return out
+    fm = blocks[0]
+    return {k: fm.get(k, "") for k in ("title", "memory_tier", "status", "project_id",
+                                       "domain", "kind", "source_agent", "updated",
+                                       "importance")}
 
 
 def collect_stats(mem_root: Path, tiers: Iterable[str] | None = None) -> dict:

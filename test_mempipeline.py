@@ -618,6 +618,14 @@ def test_inject_rules():
         check(mid is not None and abs(mid["total"] - (RECENCY_CAP + W_I * 0.6 + mid["rel"])) < 1e-9,
               "total=rec+imp+rel 正本公式")
 
+        # B 系列接线（2026-09-21）：注入面附 L0 摘要卡（cards 第七面，既有六面不变，
+        # 红act 在扫描层已被排除故卡片不可能含 redacted）
+        check(bool(r.get("cards"))
+              and set(r["cards"][0]) == {"path", "title", "summary", "score"},
+              f"cards 为 L0 摘要卡字段（{sorted(r['cards'][0]) if r.get('cards') else 'empty'}）")
+        check(any(c["title"] == "定投纪律" for c in r["cards"]),
+              "cards 覆盖 top 条目（title 经披露层提取）")
+
         # 锚点归类 + activity_date 链（created 优先于 updated/缺失）
         check(any(s["layer"] == "01-长期记忆" for s in r["anchor"]), "长期锚点归类")
         anchor_fm = {"created": yest, "updated": today}

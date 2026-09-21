@@ -102,6 +102,9 @@ def main() -> bool:
         # 4. search（不依赖 Ollama：语义缺失回落 TF-IDF）
         sr = get("/api/search?q=" + urllib.request.quote("单笔风险") + "&k=3")
         check(len(sr) >= 1, f"检索返回结果（{len(sr)} 条）")
+        # B 系列接线（2026-09-21）：列表/摘要场景返回 L0 摘要卡（title/summary 随卡）
+        check(bool(sr) and "title" in sr[0] and "summary" in sr[0],
+              f"search 返回 L0 摘要卡（{sorted(sr[0]) if sr else 'none'}）")
 
         # 5. audit tail
         au = get("/api/audit?n=10")
@@ -144,6 +147,20 @@ def main() -> bool:
               f"stats by_status 仍保留 redacted 观测位（{st3['by_status']}）")
         ista = get("/api/index_status")
         check(isinstance(ista, dict), "index_status 返回对象")
+
+        # B 系列接线（2026-09-21）：详情端点走 L2 剥 frontmatter 正文；
+        # redacted 经披露层同源拒答（title/body 全空）；路径越界拒答
+        nd = get("/api/note?path=" + urllib.request.quote(str(out2)))
+        check("正文B" in nd.get("body", "") and "title:" not in nd.get("body", ""),
+              f"详情返回 L2 剥离正文（{nd.get('body')!r}）")
+        check(nd.get("title") == "经验", f"详情 title 经 L0 卡提取（{nd.get('title')!r}）")
+        nd_red = get("/api/note?path=" + urllib.request.quote(str(red_path)))
+        check(nd_red.get("body") == "" and nd_red.get("title") == "",
+              "redacted 详情同源拒答（全空，不泄露秘文）")
+        nd_evil = get("/api/note?path=" + urllib.request.quote("../evil.md"))
+        check(nd_evil.get("body") == "" and nd_evil.get("title") == "",
+              "路径越界详情拒答")
+
         try:
             urllib.request.urlopen(base + "/no/such/route", timeout=5)
             check(False, "未知路由应 404")

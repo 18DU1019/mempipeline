@@ -473,7 +473,9 @@ class TFIDFIndex:
 # --- 渐进披露（P1-2，检验报告第五-2 对标项）：recall 命中 → L0 摘要卡 / L1 大纲 / L2 全文 ---
 # 对标社区「分层读取」：检索面返回裸 (path, score)，消费方按需逐层加深，
 # 避免一次性把全文灌进上下文。纯增量：不改任何既有 recall 返回形态，消费方
-# 零破坏；inject/panel 接线属 B 系列另行拍板。红act 排除语义延伸到披露层：
+# 零破坏。B 系列已接线（2026-09-21 拍板；原注释「inject/panel 接线属 B 系列
+# 另行拍板」就此闭项）：inject 注入面 top 附 L0 摘要卡（inject.cards），
+# panel 检索列表用 L0、详情端点 /api/note 用 L2。红act 排除语义延伸到披露层：
 # 任一层对 redacted 一律拒答（与检索/导出同源切断，P3.12/P1-5 统一排除）。
 
 def _read_note(path: str | Path) -> str | None:

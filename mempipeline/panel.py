@@ -6,7 +6,11 @@
 - GET  /api/stats   → 镜像统计（总数 + status/project/tier 分布）
 - GET  /api/queue   → candidate 审核队列（promoted/rejected 一键操作）
 - GET  /api/audit?n=→ 审计日志 tail N
-- GET  /api/search?q=&project=&k= → hybrid_recall（语义失败自动回落 TF-IDF）
+- GET /api/search?q=&project=&k= → hybrid_recall（语义失败自动回落 TF-IDF）；
+  B 系列接线：列表/摘要场景返回 L0 摘要卡（path/title/summary/score），
+  披露层异常回落旧裸 path+score 形态
+- GET /api/note?path= → 笔记详情（B 系列接线：L2 剥 frontmatter 正文；
+  redacted/缺档经披露层同源拒答，路径越界拒答）
 - GET  /api/browse?page=&limit= → 全量记忆浏览（分页，按更新时间倒序）
 - GET  /api/index_status → 语义索引 vs 镜像篇数
 - GET  /api/activity → 记忆活跃度热力（updated 月度分桶 + 窗口外数 + 最新一篇）
@@ -41,7 +45,7 @@ from .panel_ops import (
     _submit_note,
     collect_stats,
 )
-from .recall import DEFAULT_SYNONYMS, MemoryRecall
+from .recall import DEFAULT_SYNONYMS, MemoryRecall, disclose_l0, disclose_l2
 
 # 面板投稿位（与 WorkBuddy 投稿契约一致，TRAE 端 staging_ingest.py 熔合）
 def _resolve_staging_root() -> Path:
@@ -243,6 +247,7 @@ td::before{content:attr(data-label);flex:0 0 76px;color:var(--color-ink-subtle);
 <button class="btn btn--primary" onclick="search()">检索</button>
 </div>
 <div id="sr" aria-live="polite"></div>
+<div id="nd" aria-live="polite"></div>
 </div>
 <h2 class="h1">审计日志</h2>
 <div class="card" id="audit" aria-live="polite">加载中…</div>
@@ -312,7 +317,9 @@ q.map(function(n){return `<tr><td data-label="笔记">${esc(n.title)}</td><td da
 :empty('暂无待审 candidate','记忆写入后若判定为候选，会出现在这里等待晋升')}
 async function go(path,to){await j('/api/transition',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path,to:to})});loadQueue();loadStats()}
 async function search(){const q=document.getElementById('q').value;const r=await j('/api/search?q='+encodeURIComponent(q));
-document.getElementById('sr').innerHTML=r.length?'<div style="margin-top:12px">'+r.map(function(x){return `<div class="hit">${esc(x.path)} <span class="num">${x.score.toFixed(4)}</span></div>`}).join('')+'</div>':empty('无结果','换个关键词，或确认语义索引已重建')}
+document.getElementById('sr').innerHTML=r.length?'<div style="margin-top:12px">'+r.map(function(x){return `<div class="hit" style="cursor:pointer" onclick="noteDetail('${jstr(x.path)}')"><b>${esc(x.title||x.path)}</b> <span class="num">${(x.score||0).toFixed(4)}</span><br><span class="subtle">${esc(x.summary||'')}</span></div>`}).join('')+'</div>':empty('无结果','换个关键词，或确认语义索引已重建')}
+async function noteDetail(p){const n=await j('/api/note?path='+encodeURIComponent(p));
+document.getElementById('nd').innerHTML='<div class="hit"><b>'+esc(n.title||n.path)+'</b><pre style="white-space:pre-wrap;font-family:var(--font-mono);font-size:12px;margin:8px 0 0">'+esc(n.body||'（无内容或不可展示）')+'</pre></div>'}
 async function loadAudit(){const a=await j('/api/audit?n=30');
 document.getElementById('audit').innerHTML=a.length?`<table><tr><th scope="col">最近审计记录</th></tr>${a.map(function(l){return `<tr><td data-label="记录" class="subtle">${esc(l)}</td></tr>`}).join('')}</table>`:empty('暂无审计记录')}
 let browsePage=1;
@@ -416,7 +423,17 @@ class _Handler(BaseHTTPRequestHandler):
                     self.access_log.record([p for p, _ in res], source="panel_search")
                 except Exception:
                     pass
-            _json(self, [{"path": p, "score": round(s, 4)} for p, s in res])
+            # B 系列（2026-09-21）：列表/摘要场景走披露层 L0 摘要卡——
+            # 命中直接带 title/summary，前端免再读全文；详情由 /api/note 升 L2。
+            # 回落保护：披露层异常时退回旧裸 path+score 形态，端点不崩。
+            try:
+                cards = disclose_l0(res)
+                out = [{"path": c["path"], "title": c["title"],
+                        "summary": c["summary"], "score": round(c["score"], 4)}
+                       for c in cards]
+            except Exception:
+                out = [{"path": p, "score": round(s, 4)} for p, s in res]
+            _json(self, out)
         elif path == "/api/browse":
             page = int(qs.get("page", ["1"])[0])
             limit = min(int(qs.get("limit", ["50"])[0]), 200)
@@ -428,6 +445,8 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/exposure":
             days = min(max(int(qs.get("days", ["30"])[0]), 1), 365)
             _json(self, _exposure(self.access_log, self.mem_root, days))
+        elif path == "/api/note":
+            _json(self, self._note_detail(qs.get("path", [""])[0]))
         else:
             _json(self, {"error": "not found"}, 404)
 
@@ -450,6 +469,25 @@ class _Handler(BaseHTTPRequestHandler):
             return trust_of_path(path, trusted)
         except Exception:
             return TRUST_UNKNOWN
+
+    def _note_detail(self, p: str) -> dict:
+        # B 系列（2026-09-21）详情场景：走披露层 L2（剥 frontmatter 正文），
+        # title 复用 L0 卡（score 占位 0 不出响应）。红act 同源拒答穿透披露层：
+        # 任一层拒答 → title/body 全空，与缺档不可区分（不泄露秘文存在性）。
+        # 路径越界与 transition 同款校验；披露层异常回落空响应，端点不崩。
+        empty = {"path": p, "title": "", "body": ""}
+        try:
+            pp = Path(p).resolve()
+            pp.relative_to(self.mem_root.resolve())
+        except Exception:
+            return empty
+        try:
+            body = disclose_l2(pp)
+            cards = disclose_l0([(str(pp), 0.0)])
+            title = cards[0]["title"] if cards else ""
+        except Exception:
+            return empty
+        return {"path": str(pp), "title": title, "body": body}
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)

@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .protocol import parse_frontmatter
-from .recall import _tokens, is_redacted, scan_tier_dirs
+from .recall import _tokens, disclose_l0, is_redacted, scan_tier_dirs
 
 W_R, LAMBDA, W_I, W_S = 0.4, 0.05, 0.4, 0.2  # 正本字面常数，勿改
 LAYER_IMP = {"01-长期记忆": 0.9, "02-中期记忆": 0.6, "01-规则": 0.9}
@@ -167,13 +167,19 @@ def inject(query: str, mem_root: Path, rule_root: Path,
            warmup_days: int = 14) -> dict:
     """注入等价物：规则层 + 镜像统一混排；无 query 时退化冷启动注入面。
 
-    返回 {query, top, anchor, warmup, abstain, read_errors}：
+    返回 {query, top, anchor, warmup, abstain, read_errors, cards}：
     - top：混排 total 降序前 k（每条带 score_mixed 全通道明细）；
     - anchor：top 中长期层条目（长期锚点）；
     - warmup：activity_date 落在近 warmup_days 天内的条目按新→旧序（近期预热），
       冷启动（query 为空）时的主要注入面；
     - abstain：最高字面重叠分量低于 ABSTAIN_REL（正本弃权线）时 True；
-    - read_errors：镜像+规则读失败计数（G 项可见性范式）。
+    - read_errors：镜像+规则读失败计数（G 项可见性范式）；
+    - cards：B 系列（2026-09-21）接线渐进披露——top 条目的 L0 摘要卡
+      （recall.disclose_l0 扩卡，score 取混排 total）。注入文案默认用卡片，
+      需要细节时由消费方按 recall.disclose_l1 / disclose_l2 对卡片 path
+      逐层升（懒加深，不预取）。红act 同源拒答穿透披露层（任一层拒答）；
+      披露层不可用/异常时回落为 []，top/anchor/warmup 既有六面零变化，
+      打分链路（全量读）不依赖披露层，行为与接线前一致。
     """
     if tiers is None:
         tiers = ("01-长期记忆", "02-中期记忆")
@@ -213,6 +219,13 @@ def inject(query: str, mem_root: Path, rule_root: Path,
     top = scored[:k]
     anchor = [s for s in top if s["layer"] == "01-长期记忆"][:3]
 
+    # B 系列接线（2026-09-21）：top 条目默认附 L0 摘要卡（渐进披露第七面）。
+    # 回落保护：披露层异常时 cards=[]，既有六面与打分链路零影响。
+    try:
+        cards = disclose_l0([(str(s["path"]), s["total"]) for s in top])
+    except Exception:
+        cards = []
+
     warmup: list[dict] = []
     for p, fm, _t in entries:
         age = _days_since(activity_date(fm))
@@ -225,4 +238,4 @@ def inject(query: str, mem_root: Path, rule_root: Path,
     max_rel = max((s["lex"] for s in scored), default=0.0) * W_S
     return {"query": query, "top": top, "anchor": anchor, "warmup": warmup,
             "abstain": bool(query) and max_rel < ABSTAIN_REL,
-            "read_errors": read_errors}
+            "read_errors": read_errors, "cards": cards}

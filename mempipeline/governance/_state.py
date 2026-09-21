@@ -42,27 +42,18 @@ KIND_BLACKLIST_HINTS = ("闲聊", "草稿", "调试", "临时", "测试片段", 
 KIND_DEFAULT = "result"
 
 
-# --- frontmatter status 修改（复用 crossref._upsert 模式，本包自持）---
+# --- frontmatter status 修改（二期：统一走 protocol.upsert_fm_value，同模式收敛）---
 _FM_RE = re.compile(r"^---\s*\n(.*?)\n---", re.S)
 
 
 def _upsert_status(text: str, status: str) -> str:
-    """在 frontmatter 内插入/替换 status 行（DQ 标量）。无 frontmatter 不改动。"""
-    from ..protocol import _fmt_scalar
-    m = _FM_RE.match(text)
-    if not m:
-        return text
-    fm = m.group(1)
-    line = f"status: {_fmt_scalar(status)}"
-    if re.search(r"(?m)^\s*status:", fm):
-        fm = re.sub(r"(?m)^\s*status:.*$", line, fm)
-    else:
-        parts = fm.splitlines()
-        insert_at = next((i for i, l in enumerate(parts)
-                          if re.match(r"^\s*updated:", l)), len(parts))
-        parts.insert(insert_at, line)
-        fm = "\n".join(parts)
-    return f"---\n{fm}\n---" + text[m.end():]
+    """在 frontmatter 内插入/替换 status 行（DQ 标量）。无 frontmatter 不改动。
+
+    收敛自 protocol.upsert_fm_value（锚点 = updated 前插入；替换/无 FM 语义
+    与原实现逐字一致，检验报告第六节"相邻债务"二期）。
+    """
+    from ..protocol import upsert_fm_value
+    return upsert_fm_value(text, "status", status, insert_before=("updated",))
 
 
 def _read_fm_value(fm: str, key: str) -> str | None:

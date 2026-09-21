@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 from typing import Iterable
 
-from .protocol import _fmt_scalar, unquote
+from .protocol import unquote
 from .engine import write_atomic
 from .audit import AuditBackend
 from .recall import _bigrams, _jaccard, scan_tier_dirs
@@ -64,22 +64,13 @@ def _links_of(text: str) -> str:
 
 
 def _upsert_links(text: str, links: str) -> str:
-    """在 frontmatter 内插入/替换 links 行（DQ 标量，符合转义契约）。"""
-    m = _FM_RE.match(text)
-    if not m:                       # 无 frontmatter 则不改动
-        return text
-    fm = m.group(1)
-    line = f"links: {_fmt_scalar(links)}"
-    if re.search(r"(?m)^\s*links:", fm):
-        fm = re.sub(r"(?m)^\s*links:.*$", line, fm)
-    else:
-        parts = fm.splitlines()
-        insert_at = next((i for i, l in enumerate(parts)
-                          if re.match(r"^\s*status:", l) or re.match(r"^\s*updated:", l)),
-                         len(parts))
-        parts.insert(insert_at, line)
-        fm = "\n".join(parts)
-    return f"---\n{fm}\n---" + text[m.end():]
+    """在 frontmatter 内插入/替换 links 行（DQ 标量，符合转义契约）。
+
+    收敛自 protocol.upsert_fm_value（锚点 = status/updated 前插入；替换/无 FM
+    语义与原实现逐字一致，检验报告第六节"相邻债务"二期）。
+    """
+    from .protocol import upsert_fm_value
+    return upsert_fm_value(text, "links", links, insert_before=("status", "updated"))
 
 
 def find_related(note_text: str, mem_root: Path, tiers: Iterable[str] | None = None,

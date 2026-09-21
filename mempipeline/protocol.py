@@ -134,6 +134,47 @@ def unquote(v: str) -> str:
     return v
 
 
+# --- 写侧契约：frontmatter 键行插入/替换（二期收敛，检验报告第六节"相邻债务"）---
+# 与读侧 _FM_RE 刻意不同：不吞块尾空白（重写时原样保留 frontmatter 与正文
+# 之间的空行）。governance._upsert_status 与 crossref._upsert_links 的逐字
+# 同构实现收敛于此。
+_FM_WRITE_RE = re.compile(r"^---\s*\n(.*?)\n---", re.S)
+
+
+def upsert_fm_value(text: str, key: str, value: str,
+                    insert_before: tuple[str, ...] = ()) -> str:
+    """在 frontmatter 内插入/替换 `key` 行（值经 _fmt_scalar 编码为 DQ 标量）。
+
+    行为规格（对齐两处既有语义的并集）：
+    - 无 frontmatter / 块不闭合 → 原文不动；
+    - 键行已存在 → 整行替换为新值行（(?m) 行锚定，保留其余行不动）；
+    - 键行不存在 → 插入到首个 `insert_before` 键行之前（默认追加到块尾）；
+    - 块外正文（含 frontmatter 与正文间的空行）逐字保留。
+
+    governance._upsert_status 的锚点 = ("updated",)，crossref._upsert_links 的
+    锚点 = ("status", "updated")，两调用点语义完全保留。
+    """
+    m = _FM_WRITE_RE.match(text)
+    if not m:
+        return text
+    fm = m.group(1)
+    line = f"{key}: {_fmt_scalar(value)}"
+    if re.search(rf"(?m)^\s*{re.escape(key)}:", fm):
+        # 替换串用 callable 返回：re.sub 对 str repl 会解释 \n/\t/\\ 等转义，
+        # 破坏 _fmt_scalar 的 DQ 转义（旧实现同样潜伏，状态值无特殊字符未被
+        # 暴露；test_frontmatter.py 13 往返闭环先暴露此缺陷）
+        fm = re.sub(rf"(?m)^\s*{re.escape(key)}:.*$", lambda m: line, fm)
+    else:
+        parts = fm.splitlines()
+        insert_at = next(
+            (i for i, l in enumerate(parts)
+             if any(re.match(rf"^\s*{re.escape(k)}:", l) for k in insert_before)),
+            len(parts))
+        parts.insert(insert_at, line)
+        fm = "\n".join(parts)
+    return f"---\n{fm}\n---" + text[m.end():]
+
+
 @dataclass
 class Note:
     title: str

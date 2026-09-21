@@ -21,7 +21,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from mempipeline.protocol import _fmt_scalar, parse_frontmatter, parse_frontmatter_blocks
+from mempipeline.protocol import (_fmt_scalar, parse_frontmatter,
+                                  parse_frontmatter_blocks, upsert_fm_value)
 
 
 def test_crossline_swallow():
@@ -92,6 +93,49 @@ def test_missing_vs_empty():
     assert fm.get("writer_id") is None, "缺键 get() 应返回 None"
 
 
+# --- 写侧契约行为快照（二期 upsert 收敛，检验报告第六节"相邻债务"）---
+
+def test_upsert_replace():
+    # 10. 键行已存在 → 整行替换（值经 _fmt_scalar 编码），其余行逐字保留
+    text = '---\ntitle: t\nstatus: "draft"\nupdated: "2026-09-21 08:00:00"\n---\n\n正文\n'
+    out = upsert_fm_value(text, "status", "redacted", insert_before=("updated",))
+    assert 'status: "redacted"' in out and "title: t" in out
+    assert out.count("status:") == 1, f"替换不得产生重复键行: {out!r}"
+    assert out.endswith("\n\n正文\n"), f"块尾空行与正文须保留: {out[-20:]!r}"
+
+
+def test_upsert_insert_anchor():
+    # 11. 键行不存在 → 插入到首个 insert_before 键行之前（status 锚点=updated；
+    #     links 锚点=status/updated；无锚点则追加块尾）
+    text = '---\ntitle: t\nupdated: "2026-09-21 08:00:00"\n---\n正文\n'
+    out = upsert_fm_value(text, "status", "active", insert_before=("updated",))
+    assert out == ('---\ntitle: t\nstatus: "active"\n'
+                   'updated: "2026-09-21 08:00:00"\n---\n正文\n'), f"status 插 updated 前: {out!r}"
+    out2 = upsert_fm_value(text, "links", "[[a]]", insert_before=("status", "updated"))
+    assert out2 == ('---\ntitle: t\nlinks: "[[a]]"\n'
+                    'updated: "2026-09-21 08:00:00"\n---\n正文\n'), f"links 插 status/updated 前: {out2!r}"
+    out3 = upsert_fm_value("---\ntitle: t\n---\n正文\n", "extra", "x")
+    assert out3 == '---\ntitle: t\nextra: "x"\n---\n正文\n', f"无锚点追加块尾: {out3!r}"
+
+
+def test_upsert_no_fm_unchanged():
+    # 12. 无 frontmatter / 块不闭合 → 原文不动
+    assert upsert_fm_value("纯正文\n", "status", "x") == "纯正文\n"
+    assert upsert_fm_value("---\n未闭合\n", "status", "x") == "---\n未闭合\n"
+    assert upsert_fm_value("", "status", "x") == ""
+
+
+def test_upsert_roundtrip_idempotent():
+    # 13. 写侧往返闭环 + 幂等：特殊字符经 _fmt_scalar 编码后解析回原值；重复 upsert 不增殖
+    text = '---\ntitle: t\nstatus: "active"\n---\n\n正文\n'
+    val = 'a\nb "q" \\c\t'
+    out = upsert_fm_value(text, "status", val, insert_before=("updated",))
+    assert parse_frontmatter(out)["status"] == val, "upsert 后读侧往返一致"
+    out2 = upsert_fm_value(out, "status", "archived", insert_before=("updated",))
+    assert out2.count("status:") == 1
+    assert parse_frontmatter(out2)["status"] == "archived"
+
+
 def main() -> bool:
     ok = True
 
@@ -148,6 +192,18 @@ def main() -> bool:
         check(True, "9. 缺键 None / 空值 '' 语义区分")
     except AssertionError as e:
         check(False, f"9. 缺键/空值语义（{e}）")
+    print("== frontmatter 写侧契约行为快照（二期 upsert 收敛）==")
+    for fn, no, msg in (
+        (test_upsert_replace, "10", "键行替换 + 其余行/空行保留"),
+        (test_upsert_insert_anchor, "11", "insert_before 锚点语义（status/links/追加）"),
+        (test_upsert_no_fm_unchanged, "12", "无 frontmatter / 不闭合原文不动"),
+        (test_upsert_roundtrip_idempotent, "13", "往返闭环 + 重复 upsert 幂等"),
+    ):
+        try:
+            fn()
+            check(True, f"{no}. {msg}")
+        except AssertionError as e:
+            check(False, f"{no}. {msg}（{e}）")
     return ok
 
 

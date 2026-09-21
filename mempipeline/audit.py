@@ -34,7 +34,8 @@ def _now_iso() -> str:
 
 class AuditBackend(ABC):
     @abstractmethod
-    def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None) -> dict:
+    def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None,
+             prev_hash: Optional[str] = None) -> dict:
         ...
 
 
@@ -45,7 +46,8 @@ class NullAudit(AuditBackend):
     供两者复用，保证"无审计后端不崩溃"行为全程一致。
     """
 
-    def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None) -> dict:
+    def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None,
+             prev_hash: Optional[str] = None) -> dict:
         return {}
 
     def trace(self, path: Path, from_state: str, to_state: str, reason: str,
@@ -104,20 +106,28 @@ class FileAudit(AuditBackend):
                 pass
             raise
 
-    def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None) -> dict:
+    def mark(self, path: Path, kind: str, source: str = "manual", change: Optional[str] = None,
+             prev_hash: Optional[str] = None) -> dict:
         rel = self._rel(path)
         rec = {"path": rel, "kind": kind, "source": source,
                "hash": sha256(path) if path.exists() else None}
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         chg = {"收敛": "收敛", "质变": "质变"}.get(change, "-")
+        # P1-3（2026-09-21）：prev_hash = 覆盖写前上一版全文指纹。log.md 是
+        # append-only，每条覆盖写一行 prev 列，按时间序即成单条记忆版本链；
+        # manifest 只记最近一次 prev（历史链以 log 行为准）。无覆盖写为 None。
+        pv = (prev_hash or "-")[:12]
         with open(self.log_path, "a", encoding="utf-8") as f:
-            f.write(f"| {rel} | {kind} | {source} | {(rec['hash'] or '-')[:12]} | {chg} |\n")
+            f.write(f"| {rel} | {kind} | {source} | {(rec['hash'] or '-')[:12]} | {chg} | {pv} |\n")
         m = self._load()
         prev = m.setdefault("files", {}).get(rel, {})
         m.setdefault("files", {})[rel] = {
             "kind": kind,
             "source": source,
             "hash": rec["hash"],
+            # P1-3：prev_hash 传 None（skip/非覆盖类登记）时保留旧值——磁盘内容
+            # 未变则版本关系未变；write 传入新值则前进。防止 skip 行抹掉版本链。
+            "prev_hash": prev_hash if prev_hash is not None else prev.get("prev_hash"),
             "trace": prev.get("trace", []),
         }
         self._save(m)

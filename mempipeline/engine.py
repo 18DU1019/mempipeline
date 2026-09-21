@@ -11,7 +11,7 @@ import shutil
 from pathlib import Path
 
 from .protocol import stable_body
-from .audit import AuditBackend
+from .audit import AuditBackend, sha256
 
 
 _BAK_SUFFIX = ".bak"
@@ -53,10 +53,12 @@ def write_atomic(out: Path, text: str, audit: AuditBackend,
             bak.unlink(missing_ok=True)
         except OSError:
             pass
-    # 写前快照前一版为恢复点（目标已存在时）
+    # 写前快照前一版为恢复点（目标已存在时）；P1-3：同步记写前指纹入审计版本链
+    prev_hash: str | None = None
     if out.exists():
         bak.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(out, bak)
+        prev_hash = sha256(out)  # 覆盖前的上一版全文指纹（sha256），配合快照/备份可回滚定位
     tmp = out.with_name(out.name + ".tmp-%d" % os.getpid())
     try:
         tmp.write_text(text, encoding="utf-8")
@@ -69,7 +71,7 @@ def write_atomic(out: Path, text: str, audit: AuditBackend,
             pass
         raise
     # 成功：先登记审计，再销毁恢复点，保证一致性窗口可追溯。
-    audit.mark(out, "write", source=source)
+    audit.mark(out, "write", source=source, prev_hash=prev_hash)
     try:
         bak.unlink(missing_ok=True)
     except OSError:

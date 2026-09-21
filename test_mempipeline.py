@@ -747,12 +747,75 @@ def test_disclosure():
         assert disclose_l2(red) == "" and disclose_l2(d / "缺.md") == "", "redacted/缺档拒答"
 
 
+def test_version_chain():
+    """P1-3 记忆级版本语义（2026-09-21）：覆盖写前指纹入审计，log 行成单条版本链。
+
+    回归点：write_atomic 覆盖路径把被覆盖版全文 sha256 传给 audit.mark(prev_hash=)；
+    log.md append-only 每条覆盖写一行 prev 列 = 按时间序版本链；manifest 记最近一次
+    prev_hash（历史链以 log 行为准）。首次写/幂等跳过 prev 为 None 且不更新 manifest。
+    """
+    import hashlib
+    import json
+
+    def h(b: bytes) -> str:
+        # 口径与 audit.sha256 一致：磁盘字节指纹（write_text 在 Windows 落盘 CRLF，
+        # 故不能对 LF 原文字符串算——这正是本快照要锁定的口径语义）
+        return hashlib.sha256(b).hexdigest()
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mem_root = tmp / "mem"
+        (mem_root / "01-长期记忆").mkdir(parents=True)
+        log_path = tmp / "audit" / "log.md"
+        manifest_path = tmp / "audit" / "manifest.json"
+        audit = FileAudit(log_path, manifest_path, mem_root)
+
+        out = mem_root / TIER_DIR["long"] / "项目会话-版本链-deadbeef.md"
+        v1 = "---\ntitle: 版本链\n---\n\n第一版正文。\n"
+        v2 = "---\ntitle: 版本链\n---\n\n第二版正文（误改写场景）。\n"
+        v3 = "---\ntitle: 版本链\n---\n\n第三版正文。\n"
+        rel = "01-长期记忆/项目会话-版本链-deadbeef.md"
+
+        def rows() -> list[str]:
+            return [r for r in log_path.read_text(encoding="utf-8").splitlines()
+                    if "版本链" in r]
+
+        # 首次写：无上一版 → prev 列 "-"
+        write_atomic(out, v1, audit)
+        assert rows()[-1].rstrip().endswith("| - |"), f"首次写 prev='-'：{rows()[-1]}"
+        v1_disk = h(out.read_bytes())
+
+        # 覆盖写 v2：manifest prev_hash = v1 磁盘指纹、hash = v2；log prev 列 = v1[:12]
+        write_atomic(out, v2, audit)
+        v2_disk = h(out.read_bytes())
+        mani = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert mani["files"][rel]["prev_hash"] == v1_disk, f"prev=v1: {mani['files'][rel]}"
+        assert mani["files"][rel]["hash"] == v2_disk, f"hash=v2: {mani['files'][rel]}"
+        assert rows()[-1].rstrip().endswith("| " + v1_disk[:12] + " |"), \
+            f"log prev 列=v1 前12位：{rows()[-1]}"
+
+        # 幂等跳过：登记 skip 行（写/跳均登记），manifest prev_hash 保留不抹链
+        n_before = len(rows())
+        write_atomic(out, v2, audit)
+        assert len(rows()) == n_before + 1, "幂等跳过登记 skip 行"
+        assert rows()[-1].rstrip().endswith("| - |"), "skip 行自身 prev 列 '-'"
+        mani2 = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert mani2["files"][rel]["prev_hash"] == v1_disk, "skip 不抹 manifest prev_hash"
+        assert mani2["files"][rel]["hash"] == v2_disk, "skip 后磁盘内容仍 v2"
+
+        # 链式衔接：再覆盖 v3 → prev 指向 v2
+        write_atomic(out, v3, audit)
+        mani3 = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert mani3["files"][rel]["prev_hash"] == v2_disk, f"链式衔接 prev=v2: {mani3['files'][rel]}"
+        assert mani3["files"][rel]["hash"] == h(out.read_bytes())
+
+
 if __name__ == "__main__":
     _ok = main()
     for _fn in (test_crash_recover_sidecar, test_tfidf_recall, test_recall_golden,
                 test_project_isolation, test_tfidf_index, test_tfidf_vacuum,
                 test_g_error_visibility, test_inject_rules, test_default_synonyms,
-                test_disclosure):
+                test_disclosure, test_version_chain):
         try:
             _fn()
         except AssertionError as _e:

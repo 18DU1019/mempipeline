@@ -213,4 +213,18 @@
 **合题**：读取侧现状 `信任 = min(基线, 自报 trust)`（cap_trust 封顶链，2026-09-17 P1 债清偿）对当前单写者蒸馏主链 + 人工策展场景成立；诚实缺口已写进 ARCHITECTURE §4 投产现状行。**触发条件**：第二个观测型写者（robot-vision 或同类）真实接入生产且人工升档不可行。届时落点已探明：trust_rank._scan_fm 读 confidence_* → timegrap/crossref 独立证据计数 → cap_trust 链。
 
 ---
+
+### P3.15 价值回路激活 + 触发条件现实化（2026-09-22 深挖评估后维护轮）
+
+深挖评估（一手数据）暴露四问题：judge 判定仅 3 条且分散未满单 path 3 次门槛（价值回路近零）；镜像 294 篇近 7 天蒸馏写 0/跳 175 而库内元工作 20+ 笔（剪刀差）；「破千再动」按实际增速永不触发（条件失效无自检）；near-miss 挡掉的 175 条 updated/certainty 演进使镜像 freshness 停在蒸馏时点，recall time_factor 读旧值（V2 口径隐性代价）。联网对照（Memory-R1 / ENGRAM / Letta Context-Bench V2 / Zep Graphiti / AWS AgentCore lifecycle，2026）确认方向：业界均以「最终任务表现」为锚测记忆，低量个人助理场景从轻量策略起步即可，事实演进用失效不删除的双时间轴。
+
+**已实施（读取侧，运行台脚本目录）**：
+1. **judge 一步闭环**：`recall.py --adopt 路径[,路径]` 当场追加判定记录（与 `recall_judge.py mark` 同格式同文件），免去独立 mark 命令；`JUDGE_LOG` 常量单源化至 recall.py；`--no-log` 与 `--adopt` 互斥 fail-closed（防污染证据面）；无命中/空路径拒绝（exit 2）；adopt 路径不在 Top-K 时照记但打警告。`--detail` 输出增 `path=` 行（full/group 两处）供 --adopt 直接取路径。
+2. **触发条件现实化**：P0-2 审计 SQLite / P0-3 qemb 模型保护的触发条件由「规模破千」改为「(a) 单 path 判定满门槛 overlay 生成后检索质量实测不足，或 (b) 镜像规模 >800 且蒸馏写恢复增量」——原条件按实际增速（近 7 天写 0）永不满足，属条件失效未自检。
+
+**评估后暂不动（freshness 断层）**：全量回写 updated/certainty 会触碰 294 篇镜像 mtime（污染时间基准/备份增量/sediment 比对面），收益是 time_factor 不再读旧值。当前单用户场景 recall 频次低、judge 尚无采纳数据证明 freshness 在伤害实际问答——**以 judge 数据说话**：若 overlay 生成后采纳率分析显示旧值条目被频繁误采，再立项「周检批量刷新 FM 元字段」（业界口径：Zep 式 invalidate-not-overwrite 为正解方向，落地形式待届时定）。挂起条件挂到 judge 数据而非规模。
+
+**验证**：ruff F/E9 干净；--adopt 三分支（正常写入/互斥拒绝/空路径拒绝）+ detail path 行实测通过；测试痕迹已从 judge/access 日志清除（恢复 judge=3/access=29）。
+
+---
 生成：ROADMAP v0.2（2026-09-12 联网复核并规划 D 段）。拟议阶段非既定计划。

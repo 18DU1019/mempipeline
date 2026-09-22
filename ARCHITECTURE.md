@@ -62,6 +62,7 @@
 4. 转移 = 改登记表 + 停旧写者入口。
 
 信任模型：`信任 = min(写者基线, 观测置信)`；写者基线来自注册表静态条目，观测置信来自 `confidence_*` 字段。**防内容侧投毒游戏化**（Nous 实证：自信措辞投毒可得 0.96 信任）。
+> 投产现状（2026-09-22 决断点5 落账）：`confidence_*` 生产侧零写者产出（全库唯一产出者 robot_mock.py 为演示件），观测置信动态聚合**未接线**——当前链路实际执行 `信任 = min(基线, 自报 trust)`（cap_trust 封顶链已落地）。触发条件 = 第二个观测型写者真实接入生产且人工升档（改登记表 baseline_trust）不可行；届时落点已探明：trust_rank 读 confidence_* → timegrap/crossref 独立证据计数 → cap_trust 链（详见 ROADMAP P3.14）。
 > 诚实边界：`writer_id`、`confidence_*` 是自声明溯源，非防伪证明（Major Labs 六系统实测 provenance 普遍不可签名）。防伪依赖 git + audit_core；单人本地场景不上密码学签名（过度设计）。
 
 ## 5. 已知架构债（分级，供决策）

@@ -1,7 +1,71 @@
 # mempipeline
 
-![ci](https://github.com/18DU1019/mempipeline/actions/workflows/ci.yml/badge.svg)
+**Local-first shared memory for AI agents.** One writer distills, N contributors stage, unlimited readers recall — every write atomic, idempotent, audited, version-chained. **Your memory files never leave your machine.**
 
+**本地方优先的 AI Agent 共享记忆管线**：单一写者蒸馏、N 投稿者闸门投稿、无限读者召回。每次写入原子、幂等、可审计、版本链可回滚——**记忆正本永不出本机**。
+
+![ci](https://github.com/18DU1019/mempipeline/actions/workflows/ci.yml/badge.svg)
+![license](https://img.shields.io/badge/license-Apache--2.0-blue)
+
+## Why mempipeline
+
+Most agent-memory solutions are cloud APIs: convenient, but your memory — the distilled record of your decisions — lives on someone else's server. mempipeline takes the opposite bet: memory is plain Markdown on your own disk, with the discipline of a production database.
+
+| | mempipeline | Cloud APIs (Mem0 / Zep / Letta Cloud) |
+|---|---|---|
+| **Data residency** | plain Markdown files on your disk; nothing leaves the machine | memory stored in vendor cloud |
+| **Auditability** | append-only audit log + SHA-256 version chain, rollback-ready | opaque |
+| **Idempotent writes** | identical stable body is never rewritten (content-hash skip) | N/A |
+| **Feedback loop** | distill → recall → adopt/judge → trust overlay closes the loop | store/retrieve only |
+| **Retrieval** | ngram TF-IDF + SQLite inverted index; optional local bge-m3 hybrid | managed embeddings |
+| **Best fit** | single machine, single operator, privacy-first | teams, multi-tenant, hosted scale |
+
+**Honest trade-offs**: no hosted dashboard, no multi-tenant sync, no managed embeddings. If you need vendor-managed scale across a team, use the clouds. If you need your memory to stay *yours* — auditable, portable, version-chained — keep reading.
+
+## Hook up any AI agent (copy-paste)
+
+mempipeline's recall surface is just a CLI, so any agent that can run shell commands gains memory without an SDK:
+
+```text
+You are an assistant with local memory. Before answering, run:
+  python recall.py "<keywords of the current question>" --apply-judge
+Treat recalled notes as background knowledge. When an answer adopts a
+recalled note, append --adopt <hit-path> to the same command so the
+feedback loop can accumulate. If nothing hits, answer normally and say so.
+```
+
+## 30-second quick start
+
+```bash
+pip install mempipeline
+python -c "import mempipeline; print('ok')"
+```
+
+Write a memory (writer side):
+
+```python
+from pathlib import Path
+from mempipeline.audit import FileAudit
+from mempipeline.engine import write_atomic
+from mempipeline.protocol import Note
+
+mem_root = Path("./example_data/mem")
+audit = FileAudit(mem_root / ".." / "audit" / "log.md",
+                  mem_root / ".." / "audit" / "manifest.json", mem_root)
+note = Note(title="Rule", summary="demo", tier="medium", importance=0.6, body="body")
+out = mem_root / "02-中期记忆" / "项目会话-规则-ab1234cd.md"
+status, _ = write_atomic(out, note.to_frontmatter() + "\n\n" + note.body + "\n", audit)
+# status == "wrote" (first write); rewrite the same body -> "skipped" (idempotent)
+```
+
+Recall it (reader side):
+
+```python
+from mempipeline.recall import MemoryRecall
+hits = MemoryRecall(mem_root).recall("rule keywords")   # [(path, score), ...]
+```
+
+---
 
 **Shared-memory *write* pipeline for the 1-writer / N-contributor /
 unlimited-reader model.** Atomic idempotent writes, a pluggable audit

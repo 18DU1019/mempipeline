@@ -16,7 +16,7 @@ Most agent-memory solutions are cloud APIs: convenient, but your memory — the 
 | **Data residency** | plain Markdown files on your disk; nothing leaves the machine | memory stored in vendor cloud |
 | **Auditability** | append-only audit log + SHA-256 version chain, rollback-ready | opaque |
 | **Idempotent writes** | identical stable body is never rewritten (content-hash skip) | N/A |
-| **Feedback loop** | distill → recall → adopt/judge → trust overlay closes the loop | store/retrieve only |
+| **Feedback loop** | distill → recall closed in-repo; adopt/judge trust-overlay wiring left to your orchestration layer (APIs provided) | store/retrieve only |
 | **Retrieval** | ngram TF-IDF + SQLite inverted index; optional local bge-m3 hybrid | managed embeddings |
 | **Best fit** | single machine, single operator, privacy-first | teams, multi-tenant, hosted scale |
 

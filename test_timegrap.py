@@ -28,13 +28,14 @@ from mempipeline.timegrap import (
 )
 
 
-def _iso(days_ago: int) -> str:
-    return (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d %H:%M:%S")
+def _iso(days_ago: int, sec_offset: int = 0) -> str:
+    return (datetime.now() - timedelta(days=days_ago, seconds=sec_offset)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _write(md: Path, title: str, summary: str, *, days_ago: int | None = None,
-           extra_fm: str = "") -> None:
-    """写字面 frontmatter。days_ago=None 时不写 updated（测 mtime 回退）。"""
+           extra_fm: str = "", sec_offset: int = 0) -> None:
+    """写字面 frontmatter。days_ago=None 时不写 updated（测 mtime 回退）。
+    sec_offset：在 days_ago 基础上再前移秒数，用于消除同秒多稿的排序歧义。"""
     fm = "---\n"
     fm += f'title: "{title}"\n'
     fm += f'summary: "{summary}"\n'
@@ -44,7 +45,7 @@ def _write(md: Path, title: str, summary: str, *, days_ago: int | None = None,
     if extra_fm:
         fm += extra_fm
     if days_ago is not None:
-        fm += f'updated: "{_iso(days_ago)}"\n'
+        fm += f'updated: "{_iso(days_ago, sec_offset)}"\n'
     fm += "---\n\n正文。\n"
     md.write_text(fm, encoding="utf-8")
 
@@ -81,8 +82,8 @@ def main() -> bool:
         out_c = mem_root / "01-长期记忆" / "韩餐动线-c.md"
         # 稿1：首稿（180 天前）
         _write(out_a, "韩餐动线", "出餐口到餐桌要短", days_ago=180)
-        # 稿2：断更 180 天后复活（同摘要）
-        _write(out_b, "韩餐动线", "出餐口到餐桌要短", days_ago=0)
+        # 稿2：断更 180 天后复活（同摘要）；比稿3 早 60 秒，避免同秒排序歧义（CI scandir 顺序不定）
+        _write(out_b, "韩餐动线", "出餐口到餐桌要短", days_ago=0, sec_offset=60)
         # 稿3：同天多稿，结论漂移（摘要大变）
         _write(out_c, "韩餐动线", "取消堂食只做外带", days_ago=0)
 

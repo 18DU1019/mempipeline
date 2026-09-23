@@ -198,8 +198,12 @@ class TopicTimeline:
     unreachable_signals: list[str] = field(default_factory=list)
 
     def recall(self) -> list[str]:
-        """按时间升序回放该主题的完整脉络（返回各投稿路径）。"""
-        return [n.path for n in sorted(self.nodes, key=lambda n: (n.when or datetime.min))]
+        """按时间升序回放该主题的完整脉络（返回各投稿路径）。
+
+        次级键 = 路径：updated 精确相同的批写稿件（生产中真实存在），
+        排序仍确定，不随 scandir 顺序抖动（否则 dup/drift 判定翻转）。
+        """
+        return [n.path for n in sorted(self.nodes, key=lambda n: (n.when or datetime.min, n.path))]
 
     def spans_days(self) -> int:
         """脉络跨越的天数（首末投稿差）；单节点返回 0。"""
@@ -391,7 +395,7 @@ class TimelineGraph:
           body 相似度仅 0.05-0.07，比较必然产出全假 drift，故跨层对不出 relation，
           改标 relation_scope="cross-tier" 说明原因。
         """
-        nodes = sorted(tl.nodes, key=lambda n: (n.when or datetime.min))
+        nodes = sorted(tl.nodes, key=lambda n: (n.when or datetime.min, n.path))
         tl.nodes = nodes
         tl.signals = []
         for i, n in enumerate(nodes):

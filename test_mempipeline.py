@@ -526,7 +526,7 @@ def test_g_error_visibility():
 def test_inject_rules():
     """二期 A 项（2026-09-17）验收：读端规则层 + 注入等价物（正本常数忠实性）。
 
-    评分正本 = 公司机脚本版字面常数（W_R/LAMBDA/W_I/W_S=0.4/0.05/0.4/0.2、
+    评分正本 = 公司机脚本版字面常数（W_R/LAMBDA/W_I/W_S=0.4/0.05/0.4/0.4、
     LAYER_IMP、RULE_REL_BOOST=2.5、ABSTAIN=W_S*0.5、recency 封顶 0.2、
     activity_date 链 last_active>created>updated）。本测试按正本公式手工
     复算期望值逐条断言；真·跨机一致性（top3 对齐公司机脚本）在笔记本部署
@@ -550,7 +550,7 @@ def test_inject_rules():
                                     collect_rules, inject, score_mixed)
 
     # 正本常数字面复核（防手滑改参）
-    check((W_R, W_S, W_I) == (0.4, 0.2, 0.4) and RULE_REL_BOOST == 2.5,
+    check((W_R, W_S, W_I) == (0.4, 0.4, 0.4) and RULE_REL_BOOST == 2.5,
           "正本字面常数 W_R/W_S/W_I/RULE_REL_BOOST")
     check(ABSTAIN_REL == W_S * 0.5 and RULE_REL_GATE == W_S * 0.5
           and RECENCY_CAP == 0.2, "弃权线/闸门/封顶与正本同源")

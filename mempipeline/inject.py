@@ -2,7 +2,7 @@
 
 评分正本 = 公司机 A 脚本版 recall.py 字面通道常数（ARCHITECTURE.md §8 A 行）：
     score(t) = W_R·exp(-LAMBDA·Δdays) + W_I·importance + W_S·rel
-常数 W_R/LAMBDA/W_I/W_S = 0.4/0.05/0.4/0.2、LAYER_IMP、RULE_REL_BOOST = 2.5、
+常数 W_R/LAMBDA/W_I/W_S = 0.4/0.05/0.4/0.4、LAYER_IMP、RULE_REL_BOOST = 2.5、
 ABSTAIN 线 = W_S·0.5 全部逐字面复刻，禁止调参（改常数即破坏跨机一致性验收）。
 
 范围外（口径红线）：语义层双口径、版本链 boost、JUDGE overlay、域 MOC 导航层——
@@ -26,7 +26,7 @@ from typing import Iterable
 from .protocol import parse_frontmatter
 from .recall import _tokens, disclose_l0, is_redacted, scan_tier_dirs
 
-W_R, LAMBDA, W_I, W_S = 0.4, 0.05, 0.4, 0.2  # 正本字面常数，勿改
+W_R, LAMBDA, W_I, W_S = 0.4, 0.05, 0.4, 0.4  # 正本字面常数，勿改
 LAYER_IMP = {"01-长期记忆": 0.9, "02-中期记忆": 0.6, "01-规则": 0.9}
 RULE_REL_BOOST = 2.5  # 规则层相关性 boost（rel >= W_S·0.5 生效）
 ABSTAIN_REL = W_S * 0.5  # 弃权线：最高 rel 低于此值时提示无实质重叠

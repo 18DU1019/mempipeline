@@ -22,38 +22,31 @@ Most agent-memory solutions are cloud APIs: convenient, but your memory — the 
 
 **Honest trade-offs**: no hosted dashboard, no multi-tenant sync, no managed embeddings. If you need vendor-managed scale across a team, use the clouds. If you need your memory to stay *yours* — auditable, portable, version-chained — keep reading.
 
-## Hook up any AI agent (copy-paste)
-
-mempipeline's recall surface is just a CLI, so any agent that can run shell commands gains memory without an SDK:
-
-```text
-You are an assistant with local memory. Before answering, run:
-  python recall.py "<keywords of the current question>" --apply-judge
-Treat recalled notes as background knowledge. When an answer adopts a
-recalled note, append --adopt <hit-path> to the same command so the
-feedback loop can accumulate. If nothing hits, answer normally and say so.
-```
-
 ## 30-second quick start
 
+Install from source (PyPI package coming soon):
+
 ```bash
-pip install mempipeline
+git clone https://github.com/18DU1019/mempipeline.git
+cd mempipeline
 python -c "import mempipeline; print('ok')"
 ```
 
-Write a memory (writer side):
+Write a memory (writer side), fully self-contained:
 
 ```python
 from pathlib import Path
+from tempfile import mkdtemp
 from mempipeline.audit import FileAudit
 from mempipeline.engine import write_atomic
 from mempipeline.protocol import Note
 
-mem_root = Path("./example_data/mem")
+mem_root = Path(mkdtemp()) / "mem"          # any directory you own
 audit = FileAudit(mem_root / ".." / "audit" / "log.md",
                   mem_root / ".." / "audit" / "manifest.json", mem_root)
 note = Note(title="Rule", summary="demo", tier="medium", importance=0.6, body="body")
 out = mem_root / "02-中期记忆" / "项目会话-规则-ab1234cd.md"
+out.parent.mkdir(parents=True, exist_ok=True)
 status, _ = write_atomic(out, note.to_frontmatter() + "\n\n" + note.body + "\n", audit)
 # status == "wrote" (first write); rewrite the same body -> "skipped" (idempotent)
 ```
@@ -71,15 +64,16 @@ hits = MemoryRecall(mem_root).recall("rule keywords")   # [(path, score), ...]
 unlimited-reader model.** Atomic idempotent writes, a pluggable audit
 backend, and a staging ingest gate — with zero private paths baked in.
 
-`mempipeline` sits on the **writer side** of a layered Markdown memory
-mirror. Read-side capabilities live in this same repo — ngram TF-IDF recall
-(`recall.py`, with an optional SQLite inverted-index fast path), semantic
+`mempipeline` is a **library**: `engine` (atomic idempotent writes),
+`ingest` (staging gate), `audit` (pluggable backends), plus read-side
+modules — ngram TF-IDF recall
+(`mempipeline.recall`, with an optional SQLite inverted-index fast path), semantic
 hybrid retrieval (`semantic.py`), timeline graph (`timegrap.py`),
 bidirectional cross-referencing (`crossref.py`), the PDCA Check signal
 layer (`recall_golden.py`), and a recall-degradation diagnosis & Act
 suggestion surface (`act.py`, human-triggered, Act off by default).
-External distillation / control scripts live
-under the runtime scripts dir (distill / sediment / audit_core).
+CLI orchestration (one-command recall with a judge feedback loop) sits
+in the operator's own automation layer — build yours on top of these APIs.
 
 ## Model
 

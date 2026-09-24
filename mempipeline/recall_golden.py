@@ -68,20 +68,33 @@ GOLDEN: dict[str, str] = {
 MIN_HIT_RATE = 2 / 3
 
 
+def _norm_key(p) -> str:
+    """路径键归一化（2026-09-24 复核 P0-3 修复）：abspath→normpath→normcase→POSIX。
+
+    与脚本侧 recall.py norm_path_key 同口径（脚本层无法反向 import 包，故在包内
+    保留同口径单点；两侧改动须同步）。stale_map 键此前为 str(md)（Windows 反斜杠），
+    脚本消费点用 as_posix()（正斜杠）匹配，永不命中，--stale-flag 静默失效。
+    """
+    import os
+    return os.path.normcase(os.path.normpath(os.path.abspath(str(p)))).replace("\\", "/")
+
+
 def stale_map(mem_root: Path) -> dict[str, str]:
     """由 timegrap 推导「过时旧稿」path→valid_to 图（P2-B，失效显影数据源）。
 
     对每条时间脉络，取 valid_windows()（B4）：valid_to 非 None 的稿即「已被同主题
     后续稿取代的旧稿」。返回 {path: valid_to}，valid_to 为 ISO 时间串（显影可直接
-    取日期部分）。纯只读，复用现有 timegrap 推导，零新增度量；单点数据源，
-    build_stale_map 复用它，读取侧显形（脚本 recall.py --stale-flag）也复用它。
+    取日期部分）。键统一过 _norm_key 归一为 POSIX（2026-09-24：原 str(md) 反斜杠
+    键与脚本消费点 as_posix() 永不命中）。纯只读，复用现有 timegrap 推导，零新增
+    度量；单点数据源，build_stale_map 复用它，读取侧显形（脚本 recall.py
+    --stale-flag）也复用它。
     """
     from .timegrap import build_timeline
     stale: dict[str, str] = {}
     for tl in build_timeline(mem_root).values():
         for w in tl.valid_windows():
             if w["valid_to"] is not None:
-                stale[w["path"]] = w["valid_to"]
+                stale[_norm_key(w["path"])] = w["valid_to"]
     return stale
 
 
@@ -113,7 +126,10 @@ def check(mem_root: Path, tiers: Iterable[str] | None = None,
     测试需注入自有沙盒 golden 集（避免测试依赖全局常量导致 GOLDEN 改后测试崩）。
     """
     golden = golden if golden is not None else GOLDEN
-    stale_paths = stale_paths or set()
+    # stale_paths 双侧归一（2026-09-24）：注入侧容错归一（外部直传原始路径也可），
+    # 比对侧 hit_path 与键同一 _norm_key 口径——build_stale_map 出口已归一，
+    # 但消费点再归一才能保证「双侧同一标准」（键口径单点原则）。
+    stale_paths = {_norm_key(x) for x in stale_paths} if stale_paths else set()
     recaller = MemoryRecall(mem_root, tiers=tiers, synonyms=synonyms or {})
     results: list[dict] = []
     for query, expect in golden.items():
@@ -123,7 +139,8 @@ def check(mem_root: Path, tiers: Iterable[str] | None = None,
                     if expect in Path(p).stem), None)
         hit = idx is not None
         hit_path = hits[idx][0] if hit else None
-        stale_reuse = bool(hit and hit_path in stale_paths)
+        stale_reuse = bool(hit and hit_path is not None
+                           and _norm_key(hit_path) in stale_paths)
         results.append({
             "query": query,
             "expect": expect,

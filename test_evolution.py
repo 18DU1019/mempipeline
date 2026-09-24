@@ -118,8 +118,10 @@ def main() -> bool:
         _write(old, "过时主题", "旧结论。", days_ago=90, project="C3")
         _write(new, "过时主题", "新结论。", days_ago=0, project="C3")
         stale = build_stale_map(mem_root)
-        check(str(old) in stale, "被同主题新稿取代的旧稿被标 stale")
-        check(str(new) not in stale, "最新有效稿不被标 stale")
+        # stale_map 键自 2026-09-24 起统一归一为 POSIX（_norm_key），断言同口径
+        nk = lambda p: str(p).replace("\\", "/").lower()
+        check(nk(old) in stale, "被同主题新稿取代的旧稿被标 stale")
+        check(nk(new) not in stale, "最新有效稿不被标 stale")
         g_old = {"过时 主题": "过时主题-旧稿"}
         g_new = {"过时 主题": "过时主题-新稿"}
         r_old = golden_check(mem_root, golden=g_old, stale_paths=stale)

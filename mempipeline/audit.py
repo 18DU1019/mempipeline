@@ -82,7 +82,7 @@ class FileAudit(AuditBackend):
         if not self.manifest_path.exists():
             return {}
         try:
-            return json.loads(self.manifest_path.read_text(encoding="utf-8"))
+            return json.loads(self.manifest_path.read_text(encoding="utf-8-sig"))
         except Exception:
             backup = self.manifest_path.with_name(f"{self.manifest_path.name}.corrupt-{_now()}")
             try:

@@ -259,6 +259,7 @@ class TFIDFIndex:
         if cols and "ckey" not in cols:
             self._conn.execute("DROP TABLE IF EXISTS doc")
             self._conn.execute("DROP TABLE IF EXISTS gram")
+            self._conn.execute("DROP TABLE IF EXISTS docgram")
             self._conn.commit()
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS doc (path TEXT PRIMARY KEY,"
@@ -273,14 +274,22 @@ class TFIDFIndex:
             "(gram TEXT NOT NULL, df REAL NOT NULL)")
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_gram ON gram(gram)")
-        # P0-1 真倒排：docgram 关联表（gram→path 多对多）。recall 以 SQL 预筛
+        # P0-1 真倒排：docgram 关联表（gram→doc 多对多）。recall 以 SQL 预筛
         # 候选文档（含任一查询 ngram），不再全表拉 doc 后 Python 过滤（原实现
         # 注释称"只扫描命中 ngram 的文档"实为全表拉取，属伪倒排）。主键
-        # (gram, path) 的前缀索引天然覆盖「按 gram 取 path」的候选查询。
+        # (gram, doc_id) 的前缀索引天然覆盖「按 gram 取 doc」的候选查询。
+        # P10 doc_id 化（2026-09-25）：path 文本（110+ 字符/条）在 51.6 万行倒排
+        # 里重复存储致库体 139MB（索引/源比 139:1），改存 doc.rowid 整数外键 +
+        # WITHOUT ROWID（主键即存储，不再生成第二份 autoindex），库体降至 ~30MB。
+        # gram 保留文本：215k 词项均值仅 4-6B/条，id 化收益 ~4MB 不抵复杂化。
+        # 旧 schema（path 列版）检测即整表丢弃——纯派生表，__init__ 末尾回填。
+        dg_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(docgram)")}
+        if dg_cols and "doc_id" not in dg_cols:
+            self._conn.execute("DROP TABLE IF EXISTS docgram")
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS docgram "
-            "(gram TEXT NOT NULL, path TEXT NOT NULL,"
-            " PRIMARY KEY (gram, path))")
+            "(gram TEXT NOT NULL, doc_id INTEGER NOT NULL,"
+            " PRIMARY KEY (gram, doc_id)) WITHOUT ROWID")
         self._conn.commit()
         # schema 迁移（P0-1）：docgram 为纯派生表。doc 已有数据而 docgram 为空
         # （旧库升级 / 异常中断残留）时从 doc 表全量回填，保证 recall 候选集
@@ -298,18 +307,19 @@ class TFIDFIndex:
 
         旧库升级 / docgram 与 doc 失步时由 __init__ 触发；亦可由 build() 复用
         作失步修复。返回写入行数（= gram 去重后的文档 gram 对总数）。
+        P10 doc_id 化（2026-09-25）：倒排外键由 path 文本改 doc.rowid 整数。
         """
         self._conn.execute("DELETE FROM docgram")
-        pairs: list[tuple[str, str]] = []
-        for path, ngrams_str in self._conn.execute(
-                "SELECT path, ngrams FROM doc"):
+        pairs: list[tuple[str, int]] = []
+        for did, ngrams_str in self._conn.execute(
+                "SELECT rowid, ngrams FROM doc"):
             for pair in ngrams_str.split():
                 if ":" in pair:
                     g = pair.split(":", 1)[0]
-                    pairs.append((g, path))
+                    pairs.append((g, did))
         if pairs:
             self._conn.executemany(
-                "INSERT OR IGNORE INTO docgram (gram, path) VALUES (?,?)",
+                "INSERT OR IGNORE INTO docgram (gram, doc_id) VALUES (?,?)",
                 pairs)
         self._conn.commit()
         return len(pairs)
@@ -369,30 +379,46 @@ class TFIDFIndex:
         # 必须在「新文档为空即早退」之前执行，保证重建索引仅剔除脱敏稿时也生效。
         # F-vacuum：幽灵路径与红act剔除同批 DELETE + 一次 commit（原子）。
         # P0-1：doc 删除须同步删 docgram（派生表失步会让候选集指向幽灵路径）。
+        # P10 doc_id 化：docgram 外键是 doc.rowid，必须先删 docgram（子查询
+        # 依赖 doc 行存活）再删 doc，顺序颠倒会让倒排残留悬空 doc_id。
         if drop_paths:
+            self._conn.executemany(
+                "DELETE FROM docgram WHERE doc_id IN"
+                " (SELECT rowid FROM doc WHERE path=?)",
+                [(p,) for p in drop_paths])
             for p in drop_paths:
                 self._conn.execute("DELETE FROM doc WHERE path=?", (p,))
-                self._conn.execute("DELETE FROM docgram WHERE path=?", (p,))
         if vacuum_paths:
+            self._conn.executemany(
+                "DELETE FROM docgram WHERE doc_id IN"
+                " (SELECT rowid FROM doc WHERE path=?)",
+                [(p,) for p in vacuum_paths])
             for p in vacuum_paths:
                 self._conn.execute("DELETE FROM doc WHERE path=?", (p,))
-                self._conn.execute("DELETE FROM docgram WHERE path=?", (p,))
         self.last_vacuum = vacuum_paths
         if drop_paths or vacuum_paths:
             self._conn.commit()
         if not docs and not drop_paths and not vacuum_paths:
             return 0
         # 文档级写入（doc 与 docgram 同批提交，保持派生表同步）
-        dg_pairs: list[tuple[str, str]] = []
+        # P10 doc_id 化：倒排外键取 doc.rowid。INSERT OR REPLACE 会给同 path
+        # 换新 rowid，若不清旧挂链，docgram 将残留指向已消亡 rowid 的悬空对
+        # （存量实现按 path 作键无此问题，doc_id 化后必须显式先删后插）。
+        dg_pairs: list[tuple[str, int]] = []
         for path, _ckey, norms, grams, ln in docs:
             self._conn.execute(
-                "INSERT OR REPLACE INTO doc (path, ckey, norm, ngrams) VALUES (?,?,?,?)",
+                "DELETE FROM docgram WHERE doc_id IN"
+                " (SELECT rowid FROM doc WHERE path=?)", (path,))
+            cur = self._conn.execute(
+                "INSERT OR REPLACE INTO doc (path, ckey, norm, ngrams)"
+                " VALUES (?,?,?,?)",
                 (path, _ckey, norms, " ".join(
                     f"{g}:{c}" for g, c in grams.items())))
-            dg_pairs.extend((g, path) for g in grams)
+            did = cur.lastrowid
+            dg_pairs.extend((g, did) for g in grams)
         if dg_pairs:
             self._conn.executemany(
-                "INSERT OR IGNORE INTO docgram (gram, path) VALUES (?,?)",
+                "INSERT OR IGNORE INTO docgram (gram, doc_id) VALUES (?,?)",
                 dg_pairs)
         # gram 级 df（全量重算）：doc 表含历史已索引文档，逐批 REPLACE 会丢失旧批
         # 贡献导致 idf 随增量 build 漂移，故每轮从 doc 表全量统计，语义恒等于全库。
@@ -435,23 +461,24 @@ class TFIDFIndex:
                 "SELECT df FROM gram WHERE gram=?", (g,)).fetchall()
             if rows:
                 idf[g] = rows[0][0]
-        # P0-1：SQL 候选预筛（真倒排）。docgram 主键 (gram, path) 前缀索引
+        # P0-1：SQL 候选预筛（真倒排）。docgram 主键 (gram, doc_id) 前缀索引
         # 覆盖本查询；候选集为空即无命中，直接返回，无需触碰 doc 表。
-        cand: set[str] = set()
+        # P10 doc_id 化：候选集为 doc.rowid 整数集合，打分阶段按 rowid 取行。
+        cand: set[int] = set()
         for g in set(qfreq):
-            for (path,) in self._conn.execute(
-                    "SELECT path FROM docgram WHERE gram=?", (g,)):
-                cand.add(path)
+            for (did,) in self._conn.execute(
+                    "SELECT doc_id FROM docgram WHERE gram=?", (g,)):
+                cand.add(did)
         if not cand:
             return []
         scored: list[tuple[str, float]] = []
         # 候选 doc 分批 IN 查询打分（每批 500，远低于 SQLite 变量数上限 999）
-        paths = sorted(cand)
-        for i in range(0, len(paths), 500):
-            chunk = paths[i:i + 500]
+        ids = sorted(cand)
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
             ph = ",".join("?" * len(chunk))
             for path, norms, ngrams_str in self._conn.execute(
-                    f"SELECT path, norm, ngrams FROM doc WHERE path IN ({ph})",
+                    f"SELECT path, norm, ngrams FROM doc WHERE rowid IN ({ph})",
                     chunk):
                 grams: dict[str, float] = {}
                 for pair in ngrams_str.split():

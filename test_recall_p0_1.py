@@ -96,14 +96,20 @@ def _make_mirror(root: Path) -> Path:
 
 
 def _build_candidate_set(idx, query: str) -> set[str]:
-    """新路径 SQL 预筛候选集（白盒：按 docgram 查）。"""
+    """新路径 SQL 预筛候选集（白盒：按 docgram 查）。
+
+    P10 doc_id 化（2026-09-25）：docgram 外键由 path 文本改 doc.rowid 整数，
+    白盒查询同步 JOIN doc 还原 path 集合，保持与 _legacy_candidate_paths 的
+    path 集对比语义不变。
+    """
     qterms = idx._query_terms(query)
     qgrams = _tokens(" ".join(qterms))
     qfreq = Counter(qgrams)
     cand: set[str] = set()
     for g in set(qfreq):
         for (path,) in idx._conn.execute(
-                "SELECT path FROM docgram WHERE gram=?", (g,)):
+                "SELECT d.path FROM docgram dg"
+                " JOIN doc d ON d.rowid = dg.doc_id WHERE dg.gram=?", (g,)):
             cand.add(path)
     return cand
 
@@ -199,16 +205,21 @@ def test_build_maintenance():
         added = idx.build(mem_root)
         assert added == 1, f"增量 build 应新增 1 篇，实得 {added}"
         assert idx._conn.execute(
-            "SELECT COUNT(*) FROM docgram WHERE path LIKE '%d-定投.md'"
+            "SELECT COUNT(*) FROM docgram dg JOIN doc d ON d.rowid = dg.doc_id"
+            " WHERE d.path LIKE '%d-定投.md'"
         ).fetchone()[0] > 0, "新增文档应写入 docgram"
         # 红act：c 篇加 status: redacted 后重新 build → docgram 剔除
         c_path = mem_root / "02-中期记忆" / "c-咖啡记录.md"
         c_path.write_text(
             "---\ntype: note\ntitle: 咖啡\nstatus: redacted\n---\n\n"
             "浅烘豆子咖啡烘焙度记录。\n", encoding="utf-8")
+        # P10 doc_id 化：红act build 会连 doc 行一并删除，JOIN 断言会恒真失效，
+        # 故 build 前先记下 c 的 doc_id，删后按整数外键断言倒排确实清空。
+        c_did = idx._conn.execute(
+            "SELECT rowid FROM doc WHERE path=?", (str(c_path),)).fetchone()[0]
         idx.build(mem_root)
         assert idx._conn.execute(
-            "SELECT COUNT(*) FROM docgram WHERE path=?", (str(c_path),)
+            "SELECT COUNT(*) FROM docgram WHERE doc_id=?", (c_did,)
         ).fetchone()[0] == 0, "红act 剔除后 docgram 应同步删除"
         assert idx.recall("咖啡") == [], "红act 文档不应再被召回"
         idx.close()

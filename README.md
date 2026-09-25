@@ -24,7 +24,13 @@ Most agent-memory solutions are cloud APIs: convenient, but your memory — the 
 
 ## 30-second quick start
 
-Install from source (PyPI package coming soon):
+Install from PyPI (v0.8.0+):
+
+```bash
+pip install mempipeline
+```
+
+Or from source:
 
 ```bash
 git clone https://github.com/18DU1019/mempipeline.git

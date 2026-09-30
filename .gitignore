@@ -13,3 +13,5 @@ example_data/
 
 # Real user config (never commit; only config.example.py sample is committed)
 config.py
+bench_results/
+local_index_state.json

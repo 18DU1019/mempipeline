@@ -1,0 +1,165 @@
+{
+  "name": "eval_precision_v1",
+  "version": 1,
+  "created": "2026-09-30",
+  "base": "expected_paths 相对 mem_root（默认 _agent/03-记忆），POSIX 分隔符；每条均经人工核对原文相关性后收录",
+  "category_def": {
+    "literal": "词面命中：query 含笔记标题/正文的原词",
+    "paraphrase": "同义改写：query 用 DEFAULT_SYNONYMS 词汇或语义换述，不出现笔记原词组合",
+    "cross_dir": "跨目录：expected_paths 覆盖 01-长期记忆 与 02-中期记忆 两层"
+  },
+  "queries": [
+    {
+      "id": "p01",
+      "category": "literal",
+      "query": "红利低波 512890 永久组合定投的权威回测口径是哪一版",
+      "expected_paths": [
+        "01-长期记忆/项目会话-永久组合定投方案拍板结论红利低波512890-ff650775.md"
+      ]
+    },
+    {
+      "id": "p02",
+      "category": "literal",
+      "query": "WorkBuddy 沙箱里执行 shutdown 关机重启命令被拦截",
+      "expected_paths": [
+        "01-长期记忆/项目会话-WorkBuddy沙箱拦截关机重启类命令平台硬约束-1e557b62.md"
+      ]
+    },
+    {
+      "id": "p03",
+      "category": "literal",
+      "query": "知识库大扫除 2026-09-05 P2 元数据治理完成了什么",
+      "expected_paths": [
+        "02-中期记忆/项目会话-知识库大扫除20260905P2元数据治理完成-d383c122.md"
+      ]
+    },
+    {
+      "id": "p04",
+      "category": "literal",
+      "query": "S34 扫描寻优 纳指100 30Y国债 黄金 永久组合最优配置",
+      "expected_paths": [
+        "02-中期记忆/项目会话-S34扫描寻优永久组合最优配置样本内为纳指1003730Y国债26黄金19148配置扫描-e84d1fd9.md"
+      ]
+    },
+    {
+      "id": "p05",
+      "category": "literal",
+      "query": "绿心 GreenHeart 设计语言解读 06-空间设计 正本入库",
+      "expected_paths": [
+        "02-中期记忆/项目会话-绿心GreenHeart设计语言解读正本入库06空间设计第6篇解读-f01839cf.md"
+      ]
+    },
+    {
+      "id": "p06",
+      "category": "literal",
+      "query": "Obsidian 双链规则 链接不能指向目录",
+      "expected_paths": [
+        "01-长期记忆/项目会话-Obsidian链接与双链规则-8510bb0e.md"
+      ]
+    },
+    {
+      "id": "p07",
+      "category": "literal",
+      "query": "魔芯科技 KOKONI-World MoWorld 核查结论",
+      "expected_paths": [
+        "02-中期记忆/项目会话-20260916魔芯科技KOKONIWorldMoWorld核查-c6158a66.md"
+      ]
+    },
+    {
+      "id": "p08",
+      "category": "paraphrase",
+      "query": "sandbox 环境为什么不让跑重启服务器的命令",
+      "expected_paths": [
+        "01-长期记忆/项目会话-WorkBuddy沙箱拦截关机重启类命令平台硬约束-1e557b62.md"
+      ]
+    },
+    {
+      "id": "p09",
+      "category": "paraphrase",
+      "query": "给技能库做一次 audit 查一下重复度",
+      "expected_paths": [
+        "01-长期记忆/项目会话-技能库重复度审计正确口径与能力边界-bec88045.md"
+      ]
+    },
+    {
+      "id": "p10",
+      "category": "paraphrase",
+      "query": "SKILL.md 的 metadata 用 YAML 块标量写会解析不到",
+      "expected_paths": [
+        "01-长期记忆/项目会话-技能库frontmatter解析必须支持YAML块标量221714命中-88b7e911.md"
+      ]
+    },
+    {
+      "id": "p11",
+      "category": "paraphrase",
+      "query": "把会话里的结论沉淀进知识库应该落在哪个目录",
+      "expected_paths": [
+        "01-长期记忆/项目会话-交付文件即时入库落位约定-b90ec52e.md"
+      ]
+    },
+    {
+      "id": "p12",
+      "category": "paraphrase",
+      "query": "Windows 上常驻的 Python 服务不知不觉自己消失了，根因和修法是什么",
+      "expected_paths": [
+        "01-长期记忆/项目会话-Windows长驻Python服务静默死亡致死机制与根治修法20260914定案-0d4847d4.md"
+      ]
+    },
+    {
+      "id": "p13",
+      "category": "paraphrase",
+      "query": "向用户交付前要先自检任务是否真正做完收口，不许报虚假完成",
+      "expected_paths": [
+        "01-长期记忆/项目会话-闭环检测工作准则-39906031.md"
+      ]
+    },
+    {
+      "id": "p14",
+      "category": "cross_dir",
+      "query": "永久组合",
+      "expected_paths": [
+        "01-长期记忆/项目会话-永久组合定投方案拍板结论红利低波512890-ff650775.md",
+        "02-中期记忆/项目会话-永久组合定投待拍板4项-37dc8a4f.md",
+        "02-中期记忆/项目会话-永久组合待涛哥填项保险税率教育金应急金-4a4db45a.md",
+        "02-中期记忆/项目会话-S34扫描寻优永久组合最优配置样本内为纳指1003730Y国债26黄金19148配置扫描-e84d1fd9.md"
+      ]
+    },
+    {
+      "id": "p15",
+      "category": "cross_dir",
+      "query": "mempipeline 仓库拓扑与会话快照",
+      "expected_paths": [
+        "01-长期记忆/项目会话-mempipeline生态三层仓库拓扑与脚本仓45项积压处置20260924实测-a5eba1b1.md",
+        "02-中期记忆/项目会话-会话快照20260911mempipelineP30ccreated回填与裁决A-8b0057ec.md"
+      ]
+    },
+    {
+      "id": "p16",
+      "category": "cross_dir",
+      "query": "世界模型 专题研究",
+      "expected_paths": [
+        "01-长期记忆/项目会话-涛哥的AI前沿专题研究偏好世界模型物理AIAGI路线之争-044ad4d2.md",
+        "02-中期记忆/项目会话-20260916世界模型专题研究快照-c28fb69d.md"
+      ]
+    },
+    {
+      "id": "p17",
+      "category": "cross_dir",
+      "query": "记忆系统的用法和供给链路",
+      "expected_paths": [
+        "01-长期记忆/项目会话-记忆系统用法与冷启动注入约定-c46aa5dc.md",
+        "01-长期记忆/项目会话-记忆系统三套读侧实现并存与切换可行性-6e8b7332.md",
+        "02-中期记忆/项目会话-记忆供给钩子挂载验证与7天观察期WBTRAE双端闭环-e7b93395.md"
+      ]
+    },
+    {
+      "id": "p18",
+      "category": "cross_dir",
+      "query": "跨端 skill 治理门禁",
+      "expected_paths": [
+        "01-长期记忆/项目会话-跨端skill治理作用域定案-e91f548c.md",
+        "02-中期记忆/项目会话-跨端skill治理门禁域本轮收尾-647a33b6.md"
+      ]
+    }
+  ]
+}

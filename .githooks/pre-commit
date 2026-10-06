@@ -2,7 +2,72 @@
 # pre-commit 轻量门禁：Python 语法 + 隐私驻点（硬编码路径/密钥） + 冒烟测试
 # 隐私扫描复用开源 SOP 阶段1第5类规则：拦截硬编码绝对磁盘路径与内联密钥，
 # 占位符（your-xxx / example / placeholder / <> 等）视为合法配置样例白名单放行。
-PY="${PYTHON:-$(git config --get mempipeline.python 2>/dev/null || echo python3)}"  # 解释器解析序：环境变量 PYTHON > 仓库本地配置 mempipeline.python（不入库）> PATH 中的 python3
+#
+# 2026-10-06 加固（用户批「横向处置」）：解释器解析原为单值——
+# 环境变量 PYTHON > 仓库配置 mempipeline.python（不入库）> PATH python3。
+# 该实现无兜底：仓库配置指向的 venv 解释器一旦因仓库外部的路径属性不可执行
+# （受管 python 路径被改写为链接；或 venv 位于 H: 且路径含空格——本机实测
+# rc=101 Cannot create process / rc=103 did not find executable，同内容 venv
+# 置于 C: 正常），门禁即被单方面打断，且失败信息指向错误方向。
+# 现改「候选链 + 实测探测」：按序取第一个真能跑的解释器；命中非 venv 解释器时
+# 以 Windows 形态 PYTHONPATH 接回该 venv 依赖（MSYS 形态实测无效）。全灭则响亮失败。
+# 覆盖入口：PYTHON=<python.exe 完整路径>（人工兜底/CI 指定）。
+PY=""
+PY_CANDS=""
+[ -n "$PYTHON" ] && PY_CANDS="$PYTHON
+"
+_pc="$(git config --get mempipeline.python 2>/dev/null || true)"
+[ -n "$_pc" ] && PY_CANDS="$PY_CANDS$_pc
+"
+# 受管根从 HOME 推导：本仓为公开仓库，脚本内不得出现个人路径（会被自身隐私门禁拦下）。
+MP_ROOT=""
+[ -n "${HOME:-}" ] && MP_ROOT="$HOME/.workbuddy/binaries/python"
+if [ -d "$MP_ROOT/versions" ]; then
+  _cv="$(tr -d ' \r\n' < "$MP_ROOT/versions/current" 2>/dev/null || true)"
+  [ -n "$_cv" ] && PY_CANDS="$PY_CANDS$MP_ROOT/versions/$_cv/python.exe
+"
+  for d in "$MP_ROOT"/versions/*/; do
+    [ -e "${d%/}" ] || continue
+    [ -L "${d%/}" ] && continue
+    PY_CANDS="$PY_CANDS${d}python.exe
+"
+  done
+fi
+PY_CANDS="$PY_CANDS""python3
+python
+py"
+
+while IFS= read -r c; do
+  [ -n "$c" ] || continue
+  exe="$c"
+  [ -x "$exe" ] || { exe="$(command -v "$c" 2>/dev/null)" || continue; }
+  if "$exe" -c "import sys" >/dev/null 2>&1; then PY="$exe"; break; fi   # 以能否真跑起来为准
+done <<EOF
+$PY_CANDS
+EOF
+
+if [ -z "$PY" ]; then
+  echo "[pre-commit] 未找到可用 Python 解释器——候选全部探测失败："
+  printf '   - %s\n' $PY_CANDS
+  echo "   处置：设 PYTHON=<可用 python.exe 完整路径> 后重试。"
+  exit 1
+fi
+echo "=== [pre-commit] Python 解释器 = $PY ==="
+
+# 依赖垫片：解释器不是仓库配置的 venv 时，接回其 site-packages（须 Windows 形态）
+if [ -n "$_pc" ] && [ "$PY" != "$_pc" ]; then
+  _vd="$(dirname "$(dirname "$_pc")")"
+  if [ -d "$_vd/Lib/site-packages" ]; then
+    _sw="$(cygpath -w "$_vd/Lib/site-packages" 2>/dev/null || echo '')"
+    if [ -n "$_sw" ]; then
+      if [ -z "$PYTHONPATH" ]; then PYTHONPATH="$_sw"; else PYTHONPATH="$_sw;$PYTHONPATH"; fi
+      export PYTHONPATH
+      echo "=== [pre-commit] venv 解释器不可用，已接依赖垫片：PYTHONPATH=$_sw ==="
+    else
+      echo "=== [pre-commit] 警告：cygpath 不可用，无法接依赖垫片 ==="
+    fi
+  fi
+fi
 echo "=== [pre-commit] Python 语法检查 ==="
 fail=0
 for f in $(git diff --cached --name-only --diff-filter=ACM | grep '\.py$'); do

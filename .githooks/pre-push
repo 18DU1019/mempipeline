@@ -3,7 +3,64 @@
 # 范围：远端已有提交用 remote_sha..local_sha；新分支用 rev-list --not --remotes 取未推送提交集合
 # 身份门禁：作者/提交者邮箱不得为个人邮箱（须用 GitHub noreply），防个人身份外泄到公开仓库
 # 显式逃生口：ALLOW_INSECURE_PUSH=1 git push ...（显式放行，不静默；对齐 KB_ALLOW_MIXED 惯例）
-PY="${PYTHON:-$(git config --get mempipeline.python 2>/dev/null || echo python3)}"  # 解释器解析序：环境变量 PYTHON > 仓库本地配置 mempipeline.python（不入库）> PATH 中的 python3
+# 解释器解析（2026-10-06 加固，同 pre-commit）：候选链 + 实测探测，
+# 取代原单值解析（PYTHON > git config mempipeline.python > PATH python3）。
+# 单值解析在受管 python 路径被外部改写、或配置的 venv 解释器不可执行时无兜底，
+# 会把推送门禁一并打断。命中非 venv 解释器时以 Windows 形态 PYTHONPATH 接回
+# 该 venv 依赖，保证 parity 校验仍能跑。覆盖入口：PYTHON=<python.exe 完整路径>。
+PY=""
+PY_CANDS=""
+[ -n "$PYTHON" ] && PY_CANDS="$PYTHON
+"
+_pc="$(git config --get mempipeline.python 2>/dev/null || true)"
+[ -n "$_pc" ] && PY_CANDS="$PY_CANDS$_pc
+"
+# 受管根从 HOME 推导：本仓为公开仓库，脚本内不得出现个人路径（pre-push 自身有个人路径扫描）。
+MP_ROOT=""
+[ -n "${HOME:-}" ] && MP_ROOT="$HOME/.workbuddy/binaries/python"
+if [ -d "$MP_ROOT/versions" ]; then
+  _cv="$(tr -d ' \r\n' < "$MP_ROOT/versions/current" 2>/dev/null || true)"
+  [ -n "$_cv" ] && PY_CANDS="$PY_CANDS$MP_ROOT/versions/$_cv/python.exe
+"
+  for d in "$MP_ROOT"/versions/*/; do
+    [ -e "${d%/}" ] || continue
+    [ -L "${d%/}" ] && continue
+    PY_CANDS="$PY_CANDS${d}python.exe
+"
+  done
+fi
+PY_CANDS="$PY_CANDS""python3
+python
+py"
+
+while IFS= read -r c; do
+  [ -n "$c" ] || continue
+  exe="$c"
+  [ -x "$exe" ] || { exe="$(command -v "$c" 2>/dev/null)" || continue; }
+  if "$exe" -c "import sys" >/dev/null 2>&1; then PY="$exe"; break; fi
+done <<EOF
+$PY_CANDS
+EOF
+
+if [ -z "$PY" ]; then
+  echo "[pre-push] 未找到可用 Python 解释器——候选全部探测失败："
+  printf '   - %s\n' $PY_CANDS
+  echo "   处置：设 PYTHON=<可用 python.exe 完整路径> 后重试。"
+  exit 1
+fi
+echo "=== [pre-push] Python 解释器 = $PY ==="
+
+if [ -n "$_pc" ] && [ "$PY" != "$_pc" ]; then
+  _vd="$(dirname "$(dirname "$_pc")")"
+  if [ -d "$_vd/Lib/site-packages" ]; then
+    _sw="$(cygpath -w "$_vd/Lib/site-packages" 2>/dev/null || echo '')"
+    if [ -n "$_sw" ]; then
+      if [ -z "$PYTHONPATH" ]; then PYTHONPATH="$_sw"; else PYTHONPATH="$_sw;$PYTHONPATH"; fi
+      export PYTHONPATH
+      echo "=== [pre-push] 已接依赖垫片：PYTHONPATH=$_sw ==="
+    fi
+  fi
+fi
 if [ "${ALLOW_INSECURE_PUSH:-0}" = "1" ]; then
   echo "=== [pre-push] ALLOW_INSECURE_PUSH=1 显式放行，跳过扫描 ==="
   exit 0
